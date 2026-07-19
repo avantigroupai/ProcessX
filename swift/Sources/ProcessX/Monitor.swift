@@ -73,6 +73,8 @@ final class Monitor: ObservableObject {
     private let restoreCooldown: TimeInterval = 600
     private var hotStreak: [pid_t: Int] = [:]
     private var cooldownUntil: [pid_t: Date] = [:]
+    /// Coalesce back-to-back action samples (throttle then UI refresh) into one tick.
+    private var tickCoalescePending = false
 
     init() {
         tick()
@@ -138,7 +140,7 @@ final class Monitor: ObservableObject {
             names.append(display)
         }
         if applied.isEmpty, let first = refusals.first { lastMessage = "Couldn't slow \(first)" }
-        tick()
+        scheduleTick()
         let change = AppliedChange(pids: applied, names: Array(Set(names)).sorted())
         if !applied.isEmpty { lastApplied = change }
         return change
@@ -160,7 +162,17 @@ final class Monitor: ObservableObject {
         }
         if n > 0 { lastMessage = "Restored \(n) process\(n == 1 ? "" : "es") to normal priority" }
         lastApplied = nil
-        tick()
+        scheduleTick()
+    }
+
+    /// Debounce action-driven resampling so throttle+message paths don't sample twice.
+    private func scheduleTick() {
+        guard !tickCoalescePending else { return }
+        tickCoalescePending = true
+        DispatchQueue.main.async { [weak self] in
+            self?.tickCoalescePending = false
+            self?.tick()
+        }
     }
 
     func restoreAll() { restore(pids: store.all.map(\.pid)) }
@@ -256,6 +268,7 @@ final class Monitor: ObservableObject {
             applied.append(display)
         }
         if !applied.isEmpty {
+            // Already inside tick() — refresh published list only, don't re-sample.
             throttled = store.all.sorted { $0.at > $1.at }
             lastMessage = "Auto-tamed \(Array(Set(applied)).sorted().joined(separator: ", "))"
         }

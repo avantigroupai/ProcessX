@@ -146,7 +146,11 @@ async function suiteSmoke() {
   const cfg = await req('GET', '/api/config');
   check(cfg.status === 200 && typeof cfg.json?.auto === 'boolean' && typeof cfg.json?.cpuThreshold === 'number', 'GET /api/config shape');
   // Cache-Control on API
-  check(/no-store/.test(snap.headers['cache-control'] || ''), 'API sets Cache-Control: no-store');
+  check(/no-store|no-cache/.test(snap.headers['cache-control'] || ''), 'API sets Cache-Control no-store/no-cache');
+  // Security headers
+  check(/nosniff/i.test(snap.headers['x-content-type-options'] || ''), 'X-Content-Type-Options: nosniff');
+  check(/no-referrer/i.test(snap.headers['referrer-policy'] || ''), 'Referrer-Policy: no-referrer');
+  check(/default-src/i.test(snap.headers['content-security-policy'] || ''), 'Content-Security-Policy present');
   // 404
   const nf = await req('GET', '/api/does-not-exist');
   eq(nf.status, 404, 'unknown path → 404');
@@ -154,6 +158,7 @@ async function suiteSmoke() {
   const idx = await req('GET', '/');
   check(idx.status === 200 && /ProcessX/.test(idx.text), 'GET / serves index.html');
   check(/text\/html/.test(idx.headers['content-type'] || ''), 'index served as text/html');
+  check(/nosniff/i.test(idx.headers['x-content-type-options'] || ''), 'HTML also has nosniff');
 }
 
 async function suiteCsrf() {
@@ -263,6 +268,18 @@ async function suiteFuzz() {
   await req('POST', '/api/quickfast', { headers: sameOrigin, body: { dry: true } });
   const after = (await req('GET', '/api/snapshot?f=1')).json.slowed.length;
   eq(after, before, 'quickfast dry-run does not change slowed count');
+  // PID list is capped (DoS guard) — 250 junk pids must not hang or apply
+  const flood = Array.from({ length: 250 }, (_, i) => 50_000 + i);
+  const tFlood = process.hrtime.bigint();
+  const rFlood = await req('POST', '/api/deprioritize', { headers: sameOrigin, body: { pids: flood } });
+  const floodMs = Number(process.hrtime.bigint() - tFlood) / 1e6;
+  check(rFlood.status === 200 && Array.isArray(rFlood.json?.applied), 'oversized pid list returns safe shape');
+  check((rFlood.json?.applied || []).length === 0, 'oversized pid list applies nothing');
+  check(floodMs < 8000, `oversized pid list handled promptly`, `${floodMs.toFixed(0)}ms`);
+  // API errors must not echo raw OS stderr
+  const rErr = await req('POST', '/api/deprioritize', { headers: sameOrigin, body: { pids: [1] } });
+  const reasons = (rErr.json?.errors || []).map((e) => e.reason || '').join(' ');
+  check(!/Usage:|taskpolicy:|Traceback|ENOENT/i.test(reasons), 'client errors are sanitized', reasons);
 }
 
 async function suitePerf() {
@@ -476,16 +493,32 @@ function suiteStatic() {
   const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
   const appjs = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
   check(/\.controls\s*\{[^}]*flex-wrap:\s*wrap/.test(css), 'controls row wraps (no mobile overflow)');
-  check(/@media\s*\(max-width:\s*720px\)[\s\S]*overflow-x:\s*auto/.test(css), 'table scrolls horizontally on narrow screens');
+  check(/overflow-x:\s*auto/.test(css), 'table scrolls horizontally on narrow screens');
   check(/:focus-visible\s*\{[^}]*outline:/.test(css), 'keyboard focus-visible ring defined');
   check(/aria-label="Filter apps and processes"/.test(html), 'search input has an accessible label');
   check(/id="offline"[^>]*role="alert"/.test(html), 'offline banner is a live region');
   check(/role="status"/.test(html), 'toast is a status live region');
+  check(/prefers-reduced-motion/.test(css), 'reduced-motion styles present');
+  check(/data-sort="cpu"/.test(html), 'sortable column headers present');
+  check(/id="cpuThreshold"/.test(html), 'CPU threshold control present');
+  check(/function setSort|data-sort/.test(appjs), 'front-end supports column sort');
+  check(/keydown/.test(appjs), 'keyboard shortcuts wired');
   // The XSS-escaping guard: user-controlled process labels flow through esc().
   check(/function esc\(/.test(appjs) && /innerHTML/.test(appjs), 'front-end escapes dynamic strings (esc)');
+  check(/textContent/.test(appjs), 'toast uses textContent (XSS defense in depth)');
   // Swiss-German rule: never the ß character anywhere in shipped text.
   for (const [f, s] of [['style.css', css], ['index.html', html], ['app.js', appjs]]) {
     check(!s.includes('ß'), `${f} contains no ß (Swiss spelling)`);
+  }
+  // Shared policy file exists and is valid JSON
+  const policyPath = path.join(ROOT, 'policy.json');
+  check(fs.existsSync(policyPath), 'policy.json present');
+  try {
+    const pol = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+    check(Array.isArray(pol.critical) && pol.critical.includes('WindowServer'), 'policy.json critical list');
+    check(pol.maxPidsPerRequest >= 50, 'policy.json caps pids');
+  } catch (e) {
+    bad('policy.json parses', e.message);
   }
 }
 

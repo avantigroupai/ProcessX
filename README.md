@@ -9,9 +9,15 @@ A macOS process & priority monitor with one-click reprioritization and a
 
 ```sh
 node server.js          # -> http://localhost:4747
+# or
+npm start
+npm test                # QA harness (CSRF, rebinding, fuzz, e2e, a11y)
 ```
 
-No dependencies, no admin rights, nothing to install.
+No npm dependencies, no admin rights, nothing to install.
+
+Policy constants (critical processes, media-safe list, QuickFast patterns, PID
+caps) live in `policy.json` and are loaded by the Node server under `lib/`.
 
 ## What it does
 
@@ -66,17 +72,19 @@ No dependencies, no admin rights, nothing to install.
 
 The server binds `127.0.0.1` only, but loopback is still reachable from any page
 in your browser — so every state-changing `POST` is gated by an Origin /
-`Sec-Fetch-Site` / `application/json` check (`crossSite()` in `server.js`). That
+`Sec-Fetch-Site` / `application/json` check (`crossSite()` in `lib/http.js`). That
 blocks the CSRF vector where a malicious site silently throttles your processes.
 Every `/api/*` route (reads included) also validates the `Host` header
 (`badHost()`): a DNS-rebinding page — one that repoints its own domain at
 `127.0.0.1` so the browser treats it as same-origin, defeating the Origin /
 `Sec-Fetch-Site` check — still carries its own domain in `Host`, so it is
 rejected before it can read your process list or issue an action. Forced samples
-(`?f=1`) are rate-floored so a hostile loop can't burn CPU sampling. There is
-deliberately **no authentication**: ProcessX can only affect processes you
-already own, which any local process running as you could do by calling
-`taskpolicy` directly.
+(`?f=1`) are rate-floored so a hostile loop can't burn CPU sampling. Mutating
+POSTs are token-bucket rate-limited, PID lists are capped and sanitized, and
+responses never echo raw OS stderr. Static responses send CSP, `nosniff`, and
+`Referrer-Policy`. There is deliberately **no authentication**: ProcessX can only
+affect processes you already own, which any local process running as you could
+do by calling `taskpolicy` directly.
 
 ## Known limitations
 

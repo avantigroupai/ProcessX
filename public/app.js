@@ -2,19 +2,24 @@
 /* ProcessX front-end: polls /api/snapshot, renders tiles + grouped table,
  * and drives one-click reprioritization (taskpolicy background band). */
 
+const APP_VERSION = '1.1.0';
 const $ = (id) => document.getElementById(id);
 const state = {
   snap: null,
   expanded: new Set(),
   sort: 'cpu',
+  sortAsc: false,
   search: '',
   showSystem: false,
   cpuHist: [],
   gpuHist: [],
-  offlineSince: 0,
-  freezeTable: false,   // true while pointer/focus is over the table
-  configPending: false, // true while a settings write is in flight
+  freezeTable: false,
+  configPending: false,
+  busyKeys: new Set(), // row/action keys currently in flight
+  lastInteract: Date.now(),
 };
+
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const fmtPct = (v) => (v >= 100 ? Math.round(v) : v.toFixed(1));
 function fmtBytes(b) {
@@ -26,7 +31,7 @@ function fmtBytes(b) {
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-const icon = (name, cls = 'icon sm') => `<svg class="${cls}"><use href="#i-${name}"/></svg>`;
+const icon = (name, cls = 'icon sm') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
 function sevClass(pct) { return pct >= 85 ? 'crit' : pct >= 60 ? 'warn' : ''; }
 
@@ -51,7 +56,6 @@ function drawSpark(canvas, hist, max = 100) {
     (i / (n - 1)) * (w - 2) + 1,
     h - 2 - (Math.min(max, v) / max) * (h - 5),
   ]);
-  // area wash (~10% opacity of the series hue)
   ctx.beginPath();
   ctx.moveTo(pts[0][0], h);
   for (const [x, y] of pts) ctx.lineTo(x, y);
@@ -59,7 +63,6 @@ function drawSpark(canvas, hist, max = 100) {
   ctx.closePath();
   ctx.globalAlpha = 0.1; ctx.fillStyle = accent; ctx.fill();
   ctx.globalAlpha = 1;
-  // 2px line, round joins
   ctx.beginPath();
   for (let i = 0; i < n; i++) i ? ctx.lineTo(pts[i][0], pts[i][1]) : ctx.moveTo(pts[i][0], pts[i][1]);
   ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -70,8 +73,18 @@ function drawSpark(canvas, hist, max = 100) {
 let toastTimer = null;
 function toast(msg, undoFn) {
   const el = $('toast');
-  el.innerHTML = `<span>${msg}</span>` + (undoFn ? `<button id="toastUndo">Undo</button>` : '');
-  if (undoFn) $('toastUndo').onclick = () => { hideToast(); undoFn(); };
+  el.replaceChildren();
+  const span = document.createElement('span');
+  span.textContent = msg;
+  el.appendChild(span);
+  if (undoFn) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Undo';
+    btn.id = 'toastUndo';
+    btn.addEventListener('click', () => { hideToast(); undoFn(); });
+    el.appendChild(btn);
+  }
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(hideToast, undoFn ? 9000 : 4500);
@@ -85,53 +98,77 @@ async function api(path, body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   });
+  if (r.status === 429) throw new Error('Too many actions — wait a moment');
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
 
+function actionKey(payload) {
+  if (payload.group) return 'g:' + payload.group;
+  if (payload.pids) return 'p:' + payload.pids.join(',');
+  if (payload.all) return 'all';
+  return 'x';
+}
+
 async function slow(payload, label) {
+  const key = actionKey(payload);
+  if (state.busyKeys.has(key)) return;
+  state.busyKeys.add(key);
+  render();
   try {
     const res = await api('/api/deprioritize', payload);
     if (res.applied.length) {
-      toast(`${esc(label)} moved to background priority (${res.applied.length} process${res.applied.length > 1 ? 'es' : ''})`,
+      toast(`${label} moved to background priority (${res.applied.length} process${res.applied.length > 1 ? 'es' : ''})`,
         () => restore(payload, label));
     } else if (res.errors.length) {
-      toast(`Couldn't slow ${esc(label)}: ${esc(res.errors[0].reason)}`);
+      toast(`Couldn't slow ${label}: ${res.errors[0].reason}`);
     } else {
-      toast(`${esc(label)} is already backgrounded`);
+      toast(`${label} is already backgrounded`);
     }
-  } catch (e) { toast('Action failed: ' + esc(e.message)); }
+  } catch (e) { toast('Action failed: ' + e.message); }
+  state.busyKeys.delete(key);
   refresh(true);
 }
 
 async function restore(payload, label) {
+  const key = actionKey(payload);
+  if (state.busyKeys.has(key)) return;
+  state.busyKeys.add(key);
+  render();
   try {
     const res = await api('/api/restore', payload);
-    if (res.restored.length) toast(`${esc(label)} restored to normal priority`);
-    else if (res.errors && res.errors.length) toast(`Restore failed: ${esc(res.errors[0].reason)}`);
-  } catch (e) { toast('Action failed: ' + esc(e.message)); }
+    if (res.restored.length) toast(`${label} restored to normal priority`);
+    else if (res.errors && res.errors.length) toast(`Restore failed: ${res.errors[0].reason}`);
+  } catch (e) { toast('Action failed: ' + e.message); }
+  state.busyKeys.delete(key);
   refresh(true);
 }
 
 async function quickfast() {
   const btn = $('quickfast');
+  if (btn.disabled) return;
   btn.disabled = true;
   try {
     const res = await api('/api/quickfast', {});
-    if (res.applied.length) {
+    if (res.applied && res.applied.length) {
       const names = [...new Set(res.applied.map((a) => a.name))];
       const shown = names.slice(0, 4).join(', ') + (names.length > 4 ? ` +${names.length - 4} more` : '');
-      // Undo restores exactly the pids QuickFast just slowed — not everything in
-      // the background band (which may include manual or earlier throttles).
       const appliedPids = res.applied.map((a) => a.pid);
-      toast(`QuickFast: slowed ${res.applied.length} background process${res.applied.length > 1 ? 'es' : ''} — ${esc(shown)}`,
+      toast(`QuickFast: slowed ${res.applied.length} background process${res.applied.length > 1 ? 'es' : ''} — ${shown}`,
         () => restore({ pids: appliedPids }, 'QuickFast changes'));
     } else {
       toast('QuickFast: nothing to slow down — no background hogs found');
     }
-  } catch (e) { toast('QuickFast failed: ' + esc(e.message)); }
+  } catch (e) { toast('QuickFast failed: ' + e.message); }
   btn.disabled = false;
   refresh(true);
+}
+
+function restoreAll() {
+  const n = state.snap?.slowed?.length || 0;
+  if (n === 0) return;
+  if (n > 5 && !window.confirm(`Restore all ${n} slowed processes to normal priority?`)) return;
+  restore({ all: true }, 'Everything');
 }
 
 // ------------------------------------------------------------------ render
@@ -145,37 +182,60 @@ function rowActions(g) {
   if (g.critical || !g.actionable) {
     return `<span class="protected" title="Protected — slowing this would hurt system stability">${icon('shield')}protected</span>`;
   }
+  const busy = state.busyKeys.has('g:' + g.key);
   const bits = [];
   if (g.bgCount < g.count) {
-    bits.push(`<button class="row-act" data-act="slow" data-group="${esc(g.key)}" data-label="${esc(g.name)}" title="Move to background priority (reversible)">${icon('slow')}Slow down</button>`);
+    bits.push(`<button type="button" class="row-act" data-act="slow" data-group="${esc(g.key)}" data-label="${esc(g.name)}" ${busy ? 'disabled' : ''} title="Move to background priority (reversible)">${icon('slow')}${busy ? '…' : 'Slow down'}</button>`);
   }
   if (g.bgCount > 0) {
-    bits.push(`<button class="row-act" data-act="restore" data-group="${esc(g.key)}" data-label="${esc(g.name)}" title="Restore normal priority">${icon('restore')}Restore</button>`);
+    bits.push(`<button type="button" class="row-act" data-act="restore" data-group="${esc(g.key)}" data-label="${esc(g.name)}" ${busy ? 'disabled' : ''} title="Restore normal priority">${icon('restore')}${busy ? '…' : 'Restore'}</button>`);
   }
   return bits.join(' ');
 }
 
 function childActions(p) {
   if (p.critical || !p.mine) {
-    return `<span class="protected">${icon('shield')}</span>`;
+    return `<span class="protected" title="Protected or not owned by you">${icon('shield')}</span>`;
   }
+  const busy = state.busyKeys.has('p:' + p.pid);
   if (p.bg) {
-    return `<button class="row-act" data-act="restore" data-pid="${p.pid}" data-label="${esc(p.label)}" title="Restore normal priority">${icon('restore')}Restore</button>`;
+    return `<button type="button" class="row-act" data-act="restore" data-pid="${p.pid}" data-label="${esc(p.label)}" ${busy ? 'disabled' : ''} title="Restore normal priority">${icon('restore')}${busy ? '…' : 'Restore'}</button>`;
   }
-  return `<button class="row-act" data-act="slow" data-pid="${p.pid}" data-label="${esc(p.label)}" title="Move this process to background priority">${icon('slow')}Slow down</button>`;
+  return `<button type="button" class="row-act" data-act="slow" data-pid="${p.pid}" data-label="${esc(p.label)}" ${busy ? 'disabled' : ''} title="Move this process to background priority">${icon('slow')}${busy ? '…' : 'Slow down'}</button>`;
 }
 
 function cpuCell(cpu, ncpu) {
-  // bar width = share of total machine capacity; color = how hot per-core
   const width = Math.min(100, cpu / ncpu);
   return `<span>${fmtPct(cpu)}%</span><span class="microbar ${sevClass(Math.min(100, cpu))}"><i style="width:${cpu > 0.5 ? Math.max(3, width) : 0}%"></i></span>`;
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll('.sort-ind').forEach((el) => {
+    const key = el.dataset.for;
+    if (key === state.sort) {
+      el.textContent = state.sortAsc ? '↑' : '↓';
+      el.parentElement?.classList.add('active');
+    } else {
+      el.textContent = '';
+      el.parentElement?.classList.remove('active');
+    }
+  });
+}
+
+function setSort(key) {
+  if (state.sort === key) state.sortAsc = !state.sortAsc;
+  else {
+    state.sort = key;
+    state.sortAsc = key === 'name';
+  }
+  updateSortIndicators();
+  render();
 }
 
 function render(passive = false) {
   const snap = state.snap;
   if (!snap) return;
 
-  // tiles
   $('cpuVal').textContent = fmtPct(snap.cpu.totalPct);
   setMeter($('cpuMeter'), snap.cpu.totalPct);
   $('cpuFoot').textContent = `load ${snap.loadavg[0]} · ${snap.ncpu} cores · Σ ${Math.round(snap.cpu.sumPct)}% of ${snap.ncpu * 100}%`;
@@ -183,7 +243,7 @@ function render(passive = false) {
 
   const gpu = snap.gpu.util;
   $('gpuVal').textContent = gpu == null ? 'n/a' : gpu;
-  $('gpuPct').hidden = gpu == null; // otherwise the tile reads "n/a%"
+  $('gpuPct').hidden = gpu == null;
   setMeter($('gpuMeter'), gpu == null ? 0 : gpu);
   drawSpark($('gpuSpark'), state.gpuHist);
 
@@ -200,22 +260,22 @@ function render(passive = false) {
   $('slowFoot').textContent = snap.slowed.length
     ? [...new Set(snap.slowed.map((s) => s.name + (s.origin === 'auto' ? ' (auto)' : '')))].slice(0, 3).join(', ')
     : 'processes in the background band';
-  // Don't fight an in-flight settings write. Keying this off activeElement
-  // would break on WebKit, which doesn't focus a checkbox on click — a poll
-  // landing mid-request would visually revert the user's toggle.
+
   if (snap.config && !state.configPending) {
     $('autoTame').checked = snap.config.auto;
+    const thr = Math.round(snap.config.cpuThreshold);
+    if (document.activeElement !== $('cpuThreshold')) {
+      $('cpuThreshold').value = thr;
+      $('cpuThresholdVal').textContent = thr + '%';
+    }
   }
   const ra = $('restoreAll');
   ra.hidden = snap.slowed.length === 0;
   ra.querySelector('span').textContent = `Restore all (${snap.slowed.length})`;
 
-  // table — tiles above always refresh; the rows do not rebuild on a passive
-  // (poll-driven) tick while the pointer or keyboard focus is over the table.
-  // Otherwise the 2s re-sort could move a row out from under a click and the
-  // wrong process would be throttled. User actions (expand/search/sort) pass
-  // passive=false and always rebuild.
   if (passive && state.freezeTable) return;
+  updateSortIndicators();
+
   const q = state.search.trim().toLowerCase();
   let groups = snap.groups.filter((g) => g.cpu > 0.05 || g.mem > 20 * 1024 * 1024 || g.bgCount > 0 || q);
   if (!state.showSystem) groups = groups.filter((g) => !g.system);
@@ -223,10 +283,13 @@ function render(passive = false) {
     groups = groups.filter((g) =>
       g.name.toLowerCase().includes(q) || g.procs.some((p) => p.label.toLowerCase().includes(q)));
   }
-  groups.sort((a, b) =>
-    state.sort === 'name' ? a.name.localeCompare(b.name)
-    : state.sort === 'mem' ? b.mem - a.mem
-    : b.cpu - a.cpu || b.mem - a.mem);
+
+  const mul = state.sortAsc ? 1 : -1;
+  groups.sort((a, b) => {
+    if (state.sort === 'name') return mul * a.name.localeCompare(b.name);
+    if (state.sort === 'mem') return mul * (a.mem - b.mem) || (b.cpu - a.cpu);
+    return mul * (a.cpu - b.cpu) || (b.mem - a.mem);
+  });
 
   const rows = [];
   for (const g of groups.slice(0, 80)) {
@@ -235,9 +298,10 @@ function render(passive = false) {
       g.active ? `<span class="chip active">active app</span>` : '',
       g.bgCount ? `<span class="chip slowed">${g.bgCount === g.count ? 'slowed' : g.bgCount + ' slowed'}</span>` : '',
     ].join('');
+    const expandLabel = open ? `Collapse ${g.name}` : `Expand ${g.name}`;
     rows.push(`<tr class="grp ${open ? 'open' : ''}" data-key="${esc(g.key)}">
       <td class="name">
-        <button class="twist ${g.count > 1 ? '' : 'leaf'}" data-toggle="${esc(g.key)}" aria-expanded="${open}" title="Show subprocesses">${icon('chev')}</button>
+        <button type="button" class="twist ${g.count > 1 ? '' : 'leaf'}" data-toggle="${esc(g.key)}" aria-expanded="${open}" aria-label="${esc(expandLabel)}" title="${esc(expandLabel)}">${icon('chev')}</button>
         ${kindIcon(g)}
         <span class="pname">${esc(g.name)}</span>
         ${g.count > 1 ? `<span class="pcount">×${g.count}</span>` : ''}
@@ -268,6 +332,12 @@ function render(passive = false) {
 
 // ------------------------------------------------------------------- wiring
 document.addEventListener('click', (e) => {
+  state.lastInteract = Date.now();
+  const th = e.target.closest('[data-sort]');
+  if (th) {
+    setSort(th.dataset.sort);
+    return;
+  }
   const twist = e.target.closest('[data-toggle]');
   if (twist) {
     const k = twist.dataset.toggle;
@@ -276,26 +346,26 @@ document.addEventListener('click', (e) => {
     return;
   }
   const btn = e.target.closest('button[data-act]');
-  if (!btn) return;
+  if (!btn || btn.disabled) return;
   const payload = btn.dataset.group ? { group: btn.dataset.group } : { pids: [Number(btn.dataset.pid)] };
   if (btn.dataset.act === 'slow') slow(payload, btn.dataset.label);
   else restore(payload, btn.dataset.label);
 });
 
 $('quickfast').addEventListener('click', quickfast);
-$('restoreAll').addEventListener('click', () => restore({ all: true }, 'Everything'));
-$('search').addEventListener('input', (e) => { state.search = e.target.value; render(); });
-$('sort').addEventListener('change', (e) => { state.sort = e.target.value; render(); });
-$('showSystem').addEventListener('change', (e) => { state.showSystem = e.target.checked; render(); });
+$('restoreAll').addEventListener('click', restoreAll);
+$('search').addEventListener('input', (e) => {
+  state.search = e.target.value;
+  state.lastInteract = Date.now();
+  render();
+});
+$('showSystem').addEventListener('change', (e) => {
+  state.showSystem = e.target.checked;
+  state.lastInteract = Date.now();
+  render();
+});
 
-// Freeze passive re-renders while the user is aiming at the table, then catch
-// up on release — so background polls never shift a row out from under a click.
-// Pointer and focus are tracked separately: with one shared flag, tabbing away
-// while the pointer still rests on the table (or vice versa) would thaw and
-// re-enable rebuilds mid-interaction. pointermove/pointerdown are armed too, so
-// a pointer already resting over the table at load — which fires no
-// pointerenter — still freezes before the click lands.
-const tableCard = document.querySelector('.card');
+const tableCard = $('tableCard') || document.querySelector('.card');
 let pointerOver = false;
 let focusInside = false;
 const syncFreeze = () => { state.freezeTable = pointerOver || focusInside; };
@@ -311,9 +381,11 @@ tableCard.addEventListener('focusout', (e) => {
   focusInside = false;
   release();
 });
+
 $('autoTame').addEventListener('change', async (e) => {
   const on = e.target.checked;
   state.configPending = true;
+  state.lastInteract = Date.now();
   try {
     await api('/api/config', { auto: on });
     toast(on
@@ -321,17 +393,61 @@ $('autoTame').addEventListener('change', async (e) => {
       : 'Auto-tame off (already-slowed processes stay slowed until restored)');
   } catch (err) {
     e.target.checked = !on;
-    toast('Could not change setting: ' + esc(err.message));
+    toast('Could not change setting: ' + err.message);
   } finally {
     state.configPending = false;
   }
   refresh(true);
 });
 
+let thrTimer = null;
+$('cpuThreshold').addEventListener('input', (e) => {
+  $('cpuThresholdVal').textContent = e.target.value + '%';
+});
+$('cpuThreshold').addEventListener('change', (e) => {
+  const v = Number(e.target.value);
+  state.configPending = true;
+  state.lastInteract = Date.now();
+  clearTimeout(thrTimer);
+  thrTimer = setTimeout(async () => {
+    try {
+      await api('/api/config', { cpuThreshold: v });
+      toast(`CPU threshold set to ${v}%`);
+    } catch (err) {
+      toast('Could not change threshold: ' + err.message);
+    } finally {
+      state.configPending = false;
+    }
+    refresh(true);
+  }, 200);
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target && e.target.tagName) || '';
+  const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
+  if (e.key === '/' && !typing) {
+    e.preventDefault();
+    $('search').focus();
+    $('search').select();
+    return;
+  }
+  if (typing && e.key !== 'Escape') return;
+  if (e.key === 'Escape' && typing) {
+    e.target.blur();
+    return;
+  }
+  if ((e.key === 'q' || e.key === 'Q') && !e.metaKey && !e.ctrlKey && !typing) {
+    e.preventDefault();
+    quickfast();
+  }
+  if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && !typing) {
+    e.preventDefault();
+    restoreAll();
+  }
+});
+
 // ------------------------------------------------------------------ polling
-// passive=true marks a poll-driven refresh, which defers to the freeze-on-hover
-// guard in render(). Action-driven and first-paint refreshes pass passive=false
-// so they always rebuild.
 async function refresh(force = false, passive = false) {
   try {
     const r = await fetch('/api/snapshot' + (force ? '?f=1' : ''));
@@ -348,6 +464,28 @@ async function refresh(force = false, passive = false) {
   }
 }
 
+function pollInterval() {
+  if (document.hidden) return 5000;
+  if (Date.now() - state.lastInteract > 30000) return 4000;
+  return 2000;
+}
+
+let pollTimer = null;
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(async () => {
+    if (!document.hidden) await refresh(false, true);
+    schedulePoll();
+  }, pollInterval());
+}
+
+if ($('appVersion')) $('appVersion').textContent = 'v' + APP_VERSION;
+if (reduceMotion) document.documentElement.classList.add('reduce-motion');
+
 refresh();
-setInterval(() => { if (!document.hidden) refresh(false, true); }, 2000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+schedulePoll();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refresh();
+  schedulePoll();
+});
+document.addEventListener('pointerdown', () => { state.lastInteract = Date.now(); }, { passive: true });

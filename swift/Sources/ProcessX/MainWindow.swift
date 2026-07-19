@@ -174,7 +174,7 @@ struct MainWindow: View {
 
             Toggle("System", isOn: $monitor.showSystem).toggleStyle(.switch).font(.system(size: UI.caption))
             Toggle("Auto-tame", isOn: $monitor.autoTame).toggleStyle(.switch).font(.system(size: UI.caption))
-                .help("Automatically slow any background process that stays above \(Int(monitor.cpuThreshold))% of a core for ~6s (e.g. a greedy ffmpeg encode). Bringing it to the front restores it instantly.")
+                .help("Automatically slow any background process that stays above \(Int(monitor.cpuThreshold))% of a core for ~6–8s (e.g. a greedy ffmpeg encode). Bringing it to the front restores it instantly.")
 
             Spacer()
             Text(monitor.lastMessage ?? "\(monitor.visibleGroups.count) apps")

@@ -9,7 +9,7 @@
 </head>
 <body>
 <!-- Monochrome icon set (currentColor only) -->
-<svg width="0" height="0" style="position:absolute">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
     <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></symbol>
     <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></symbol>
@@ -26,53 +26,58 @@
     <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></symbol>
     <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v5M12 17.2v.3"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24"><path d="m7 14 5 5 5-5M7 10l5-5 5 5"/></symbol>
   </defs>
 </svg>
 
 <div class="wrap">
   <header>
     <div class="brand">
-      <svg class="icon"><use href="#i-pulse"/></svg>
+      <svg class="icon" aria-hidden="true"><use href="#i-pulse"/></svg>
       <div>
         <h1>ProcessX</h1>
         <div class="sub">macOS process &amp; priority monitor</div>
       </div>
     </div>
     <div class="spacer"></div>
-    <button id="restoreAll" class="ghost" hidden>
-      <svg class="icon sm"><use href="#i-restore"/></svg><span>Restore all</span>
+    <button id="restoreAll" class="ghost" hidden type="button">
+      <svg class="icon sm" aria-hidden="true"><use href="#i-restore"/></svg><span>Restore all</span>
     </button>
-    <button id="quickfast" class="primary"
-      title="One click: pushes background hogs (Claude Desktop/Code, Cowork sessions, other high-CPU background processes) into the macOS low-priority band. Never touches the app you're using, protected system processes, or media/call apps. Fully reversible.">
-      <svg class="icon"><use href="#i-bolt"/></svg><span>QuickFast</span>
+    <button id="quickfast" class="primary" type="button"
+      title="One click: pushes background hogs (Claude Desktop/Code, Cowork sessions, other high-CPU background processes) into the macOS low-priority band. Never touches the app you're using, protected system processes, or media/call apps. Fully reversible. Shortcut: Q"
+      accesskey="q">
+      <svg class="icon" aria-hidden="true"><use href="#i-bolt"/></svg><span>QuickFast</span>
     </button>
   </header>
 
-  <div id="offline" role="alert" aria-live="assertive">Lost contact with the ProcessX server — retrying…</div>
+  <div id="offline" role="alert" aria-live="assertive">
+    Lost contact with the ProcessX server — retrying…
+    <span class="offline-hint">Start it with <code>node server.js</code> → <code>http://localhost:4747</code></span>
+  </div>
 
-  <section class="tiles">
+  <section class="tiles" aria-label="System gauges">
     <div class="tile">
-      <div class="label"><svg class="icon sm"><use href="#i-cpu"/></svg>CPU</div>
+      <div class="label"><svg class="icon sm" aria-hidden="true"><use href="#i-cpu"/></svg>CPU</div>
       <div class="value"><span id="cpuVal">–</span><small>%</small></div>
       <div class="meter" id="cpuMeter"><i></i></div>
       <canvas class="spark" id="cpuSpark" aria-label="CPU usage, recent history"></canvas>
       <div class="foot" id="cpuFoot"></div>
     </div>
     <div class="tile">
-      <div class="label"><svg class="icon sm"><use href="#i-gpu"/></svg>GPU</div>
+      <div class="label"><svg class="icon sm" aria-hidden="true"><use href="#i-gpu"/></svg>GPU</div>
       <div class="value"><span id="gpuVal">–</span><small id="gpuPct">%</small></div>
       <div class="meter" id="gpuMeter"><i></i></div>
       <canvas class="spark" id="gpuSpark" aria-label="GPU usage, recent history"></canvas>
       <div class="foot" id="gpuFoot">device utilization</div>
     </div>
     <div class="tile">
-      <div class="label"><svg class="icon sm"><use href="#i-mem"/></svg>Memory</div>
+      <div class="label"><svg class="icon sm" aria-hidden="true"><use href="#i-mem"/></svg>Memory</div>
       <div class="value"><span id="memVal">–</span></div>
       <div class="meter" id="memMeter"><i></i></div>
       <div class="foot" id="memFoot"></div>
     </div>
     <div class="tile">
-      <div class="label"><svg class="icon sm"><use href="#i-slow"/></svg>Slowed down</div>
+      <div class="label"><svg class="icon sm" aria-hidden="true"><use href="#i-slow"/></svg>Slowed down</div>
       <div class="value"><span id="slowVal">0</span></div>
       <div class="foot" id="slowFoot">processes in the background band</div>
     </div>
@@ -80,32 +85,46 @@
 
   <div class="controls">
     <div class="search">
-      <svg class="icon"><use href="#i-search"/></svg>
-      <input id="search" type="search" placeholder="Filter apps &amp; processes…" aria-label="Filter apps and processes" autocomplete="off">
+      <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="search" type="search" placeholder="Filter apps &amp; processes… (/)" aria-label="Filter apps and processes" autocomplete="off">
     </div>
-    <select id="sort" aria-label="Sort by">
-      <option value="cpu">Sort by CPU</option>
-      <option value="mem">Sort by memory</option>
-      <option value="name">Sort by name</option>
-    </select>
     <label class="check"><input type="checkbox" id="showSystem"> Show system processes</label>
-    <label class="check" title="Watchdog: any background process that stays above the CPU threshold for ~8 seconds is automatically moved to the background band (e.g. a greedy ffmpeg encode). Bringing an auto-tamed app to the front restores it instantly. Protected, media and foreground processes are never touched.">
+    <label class="check" title="Watchdog: any background process that stays above the CPU threshold for ~6–8 seconds is automatically moved to the background band (e.g. a greedy ffmpeg encode). Bringing an auto-tamed app to the front restores it instantly. Protected, media and foreground processes are never touched.">
       <input type="checkbox" id="autoTame"> Auto-tame background hogs</label>
+    <label class="threshold" title="CPU % of one core used by auto-tame and QuickFast high-CPU targeting">
+      <span>Threshold</span>
+      <input type="range" id="cpuThreshold" min="5" max="100" step="1" value="25" aria-label="CPU threshold percent">
+      <output id="cpuThresholdVal" for="cpuThreshold">25%</output>
+    </label>
   </div>
 
-  <div class="card">
-    <table aria-label="Processes grouped by application">
-      <thead>
-        <tr>
-          <th style="width:44%">App / process</th>
-          <th class="num" style="width:19%">CPU</th>
-          <th class="num" style="width:13%">Memory</th>
-          <th style="width:12%">Priority</th>
-          <th class="num" style="width:12%"></th>
-        </tr>
-      </thead>
-      <tbody id="rows"><tr><td colspan="5" class="empty">Sampling…</td></tr></tbody>
-    </table>
+  <div class="card" id="tableCard">
+    <div class="table-scroll">
+      <table aria-label="Processes grouped by application">
+        <thead>
+          <tr>
+            <th style="width:44%">
+              <button type="button" class="th-sort" data-sort="name" aria-label="Sort by name">
+                App / process <span class="sort-ind" data-for="name"></span>
+              </button>
+            </th>
+            <th class="num" style="width:19%">
+              <button type="button" class="th-sort" data-sort="cpu" aria-label="Sort by CPU">
+                CPU <span class="sort-ind" data-for="cpu"></span>
+              </button>
+            </th>
+            <th class="num" style="width:13%">
+              <button type="button" class="th-sort" data-sort="mem" aria-label="Sort by memory">
+                Memory <span class="sort-ind" data-for="mem"></span>
+              </button>
+            </th>
+            <th style="width:12%">Priority</th>
+            <th class="num" style="width:12%"></th>
+          </tr>
+        </thead>
+        <tbody id="rows"><tr><td colspan="5" class="empty">Sampling…</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
   <footer>
@@ -116,10 +135,12 @@
     core (100% = one full core). Browser rows expand to per-tab renderer processes, so a
     single heavy tab can be slowed without touching the rest of the browser. GPU shows
     device utilization (macOS doesn't expose per-process GPU without admin rights).
+    <span class="keys">Shortcuts: <kbd>/</kbd> search · <kbd>Q</kbd> QuickFast · <kbd>R</kbd> restore all</span>
+    <span class="ver" id="appVersion">v1.1.0</span>
   </footer>
 </div>
 
-<div id="toast" role="status"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -1,0 +1,31 @@
+{
+  "critical": [
+    "launchd", "kernel_task", "WindowServer", "loginwindow", "Finder", "Dock",
+    "SystemUIServer", "ControlCenter", "NotificationCenter", "Spotlight",
+    "coreaudiod", "bluetoothd", "tccd", "securityd", "opendirectoryd",
+    "distnoted", "cfprefsd", "runningboardd", "watchdogd", "logd", "notifyd",
+    "launchservicesd", "hidd", "powerd", "configd", "mDNSResponder", "syslogd",
+    "UserEventAgent", "coreservicesd", "iconservicesd", "pboard", "fontd",
+    "diskarbitrationd", "universalaccessd", "backboardd"
+  ],
+  "mediaSafe": "(^|\\/)(Music|Spotify|VLC|Podcasts|zoom\\.us|FaceTime|Microsoft Teams|Webex|OBS|QuickTime Player|Photo Booth)(\\.app)?(\\/|$| )",
+  "quickFastPatterns": ["claude", "cowork", "anthropic"],
+  "quickFastCpuThreshold": 25,
+  "terminals": [
+    "Terminal", "iTerm2", "iTerm", "Warp", "Alacritty",
+    "kitty", "WezTerm", "wezterm-gui", "Ghostty", "Hyper", "Tabby"
+  ],
+  "shells": [
+    "zsh", "bash", "sh", "fish", "tcsh", "csh", "dash",
+    "login", "tmux", "screen", "script", "nohup", "env", "caffeinate", "sudo"
+  ],
+  "interpreters": [
+    "node", "bun", "deno", "python", "python3",
+    "python2", "ruby", "perl", "java", "osascript"
+  ],
+  "autoStreak": 3,
+  "autoIntervalMs": 2500,
+  "restoreCooldownMs": 600000,
+  "maxPidsPerRequest": 200,
+  "actionConcurrency": 6
+}

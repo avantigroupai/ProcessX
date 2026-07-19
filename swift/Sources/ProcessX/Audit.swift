@@ -8,8 +8,10 @@ import Foundation
 /// must be able to answer "what did this, and when" — the store alone only says
 /// *that* it happened.
 ///
-/// ~/Library/Logs/ProcessX/audit.log
+/// ~/Library/Logs/ProcessX/audit.log — rotated when it exceeds ~5 MB.
 enum Audit {
+    private static let maxBytes: UInt64 = 5 * 1024 * 1024
+
     private static let url: URL = {
         let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs/ProcessX", isDirectory: true)
@@ -30,7 +32,6 @@ enum Audit {
         // decision site (button handler, QuickFast, auto-tame tick).
         let caller = Thread.callStackSymbols.dropFirst(2).prefix(3)
             .map { symbol -> String in
-                // "4  ProcessX  0x1004  ProcessX.Monitor.throttle(...) + 123" -> the symbol
                 let parts = symbol.split(separator: " ", omittingEmptySubsequences: true)
                 return parts.count > 3 ? String(parts[3]) : symbol
             }
@@ -38,6 +39,7 @@ enum Audit {
 
         let line = "\(fmt.string(from: Date())) pid=\(getpid()) \(message) via \(caller)\n"
         queue.async {
+            rotateIfNeeded()
             if let h = try? FileHandle(forWritingTo: url) {
                 defer { try? h.close() }
                 _ = try? h.seekToEnd()
@@ -46,6 +48,17 @@ enum Audit {
                 try? Data(line.utf8).write(to: url)
             }
         }
+    }
+
+    /// Keep the log bounded: archive to audit.log.1 and start fresh.
+    private static func rotateIfNeeded() {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? UInt64,
+              size >= maxBytes else { return }
+        let backup = url.deletingLastPathComponent().appendingPathComponent("audit.log.1")
+        try? fm.removeItem(at: backup)
+        try? fm.moveItem(at: url, to: backup)
     }
 
     static var path: String { url.path }
