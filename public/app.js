@@ -36,8 +36,11 @@ const icon = (name, cls = 'icon sm') => `<svg class="${cls}" aria-hidden="true">
 function sevClass(pct) { return pct >= 85 ? 'crit' : pct >= 60 ? 'warn' : ''; }
 
 function setMeter(el, pct) {
-  el.className = 'meter ' + sevClass(pct);
-  el.firstElementChild.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  const p = Math.max(0, Math.min(100, pct));
+  el.className = 'meter ' + sevClass(p);
+  // CSS variable keeps the fill animatable without rebuilding the DOM node.
+  el.style.setProperty('--fill', p + '%');
+  if (el.firstElementChild) el.firstElementChild.style.width = p + '%';
 }
 
 function drawSpark(canvas, hist, max = 100) {
@@ -204,9 +207,11 @@ function childActions(p) {
   return `<button type="button" class="row-act" data-act="slow" data-pid="${p.pid}" data-label="${esc(p.label)}" ${busy ? 'disabled' : ''} title="Move this process to background priority">${icon('slow')}${busy ? '…' : 'Slow down'}</button>`;
 }
 
-function cpuCell(cpu, ncpu) {
-  const width = Math.min(100, cpu / ncpu);
-  return `<span>${fmtPct(cpu)}%</span><span class="microbar ${sevClass(Math.min(100, cpu))}"><i style="width:${cpu > 0.5 ? Math.max(3, width) : 0}%"></i></span>`;
+function cpuCell(cpu, _ncpu) {
+  // Bar is relative to one full core (Activity Monitor intuition): 100% of one
+  // core fills the track. Multi-core hogs sit at full width + hot colour.
+  const width = cpu > 0.4 ? Math.min(100, Math.max(4, cpu)) : 0;
+  return `<span class="cpu-num">${fmtPct(cpu)}%</span><span class="microbar ${sevClass(Math.min(100, cpu))}" aria-hidden="true"><i style="width:${width}%"></i></span>`;
 }
 
 function updateSortIndicators() {
@@ -259,7 +264,7 @@ function render(passive = false) {
   $('slowVal').textContent = snap.slowed.length;
   $('slowFoot').textContent = snap.slowed.length
     ? [...new Set(snap.slowed.map((s) => s.name + (s.origin === 'auto' ? ' (auto)' : '')))].slice(0, 3).join(', ')
-    : 'processes in the background band';
+    : 'none — QuickFast when the Mac feels heavy';
 
   if (snap.config && !state.configPending) {
     $('autoTame').checked = snap.config.auto;
@@ -299,28 +304,42 @@ function render(passive = false) {
       g.bgCount ? `<span class="chip slowed">${g.bgCount === g.count ? 'slowed' : g.bgCount + ' slowed'}</span>` : '',
     ].join('');
     const expandLabel = open ? `Collapse ${g.name}` : `Expand ${g.name}`;
+    const prio = g.bgCount === g.count && g.count > 0
+      ? '<span class="chip slowed">background</span>'
+      : g.bgCount > 0
+        ? '<span class="chip neutral">mixed</span>'
+        : '<span class="dim">normal</span>';
     rows.push(`<tr class="grp ${open ? 'open' : ''}" data-key="${esc(g.key)}">
       <td class="name">
-        <button type="button" class="twist ${g.count > 1 ? '' : 'leaf'}" data-toggle="${esc(g.key)}" aria-expanded="${open}" aria-label="${esc(expandLabel)}" title="${esc(expandLabel)}">${icon('chev')}</button>
-        ${kindIcon(g)}
-        <span class="pname">${esc(g.name)}</span>
-        ${g.count > 1 ? `<span class="pcount">×${g.count}</span>` : ''}
-        ${badges}
+        <div class="name-line">
+          <button type="button" class="twist ${g.count > 1 ? '' : 'leaf'}" data-toggle="${esc(g.key)}" aria-expanded="${open}" aria-label="${esc(expandLabel)}" title="${esc(expandLabel)}">${icon('chev')}</button>
+          ${kindIcon(g)}
+          <span class="pname" title="${esc(g.name)}">${esc(g.name)}</span>
+          ${g.count > 1 ? `<span class="pcount">×${g.count}</span>` : ''}
+          ${badges}
+        </div>
+        <span class="mobile-meta"><span class="cpu-num">${fmtPct(g.cpu)}%</span> · ${fmtBytes(g.mem)}</span>
       </td>
-      <td class="num">${cpuCell(g.cpu, snap.ncpu)}</td>
-      <td class="num">${fmtBytes(g.mem)}</td>
-      <td>${g.bgCount === g.count && g.count > 0 ? '<span class="chip slowed">background</span>' : g.bgCount > 0 ? '<span class="chip neutral">mixed</span>' : '<span class="dim">normal</span>'}</td>
+      <td class="num col-cpu">${cpuCell(g.cpu, snap.ncpu)}</td>
+      <td class="num col-mem">${fmtBytes(g.mem)}</td>
+      <td class="col-prio">${prio}</td>
       <td class="actions-cell">${rowActions(g)}</td>
     </tr>`);
     if (open) {
       for (const p of g.procs) {
         rows.push(`<tr class="child">
-          <td class="name">${esc(p.label)} <span class="pid">${p.pid}</span>
-            ${p.bg ? `<span class="chip slowed">${p.bgOrigin === 'auto' ? 'auto-slowed' : 'slowed'}</span>` : ''}
-            ${p.nice !== 0 ? `<span class="chip neutral">nice ${p.nice}</span>` : ''}</td>
-          <td class="num">${cpuCell(p.cpu, snap.ncpu)}</td>
-          <td class="num">${fmtBytes(p.mem)}</td>
-          <td></td>
+          <td class="name">
+            <div class="name-line">
+              <span class="pname" title="${esc(p.label)}">${esc(p.label)}</span>
+              <span class="pid">${p.pid}</span>
+              ${p.bg ? `<span class="chip slowed">${p.bgOrigin === 'auto' ? 'auto-slowed' : 'slowed'}</span>` : ''}
+              ${p.nice !== 0 ? `<span class="chip neutral">nice ${p.nice}</span>` : ''}
+            </div>
+            <span class="mobile-meta"><span class="cpu-num">${fmtPct(p.cpu)}%</span> · ${fmtBytes(p.mem)}</span>
+          </td>
+          <td class="num col-cpu">${cpuCell(p.cpu, snap.ncpu)}</td>
+          <td class="num col-mem">${fmtBytes(p.mem)}</td>
+          <td class="col-prio"></td>
           <td class="actions-cell">${childActions(p)}</td>
         </tr>`);
       }

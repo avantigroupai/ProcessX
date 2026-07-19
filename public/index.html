@@ -103,23 +103,23 @@
       <table aria-label="Processes grouped by application">
         <thead>
           <tr>
-            <th style="width:44%">
+            <th style="width:40%">
               <button type="button" class="th-sort" data-sort="name" aria-label="Sort by name">
                 App / process <span class="sort-ind" data-for="name"></span>
               </button>
             </th>
-            <th class="num" style="width:19%">
+            <th class="num col-cpu" style="width:18%">
               <button type="button" class="th-sort" data-sort="cpu" aria-label="Sort by CPU">
                 CPU <span class="sort-ind" data-for="cpu"></span>
               </button>
             </th>
-            <th class="num" style="width:13%">
+            <th class="num col-mem" style="width:12%">
               <button type="button" class="th-sort" data-sort="mem" aria-label="Sort by memory">
                 Memory <span class="sort-ind" data-for="mem"></span>
               </button>
             </th>
-            <th style="width:12%">Priority</th>
-            <th class="num" style="width:12%"></th>
+            <th class="col-prio" style="width:12%">Priority</th>
+            <th class="num" style="width:18%"></th>
           </tr>
         </thead>
         <tbody id="rows"><tr><td colspan="5" class="empty">Sampling…</td></tr></tbody>

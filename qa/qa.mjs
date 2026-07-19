@@ -493,7 +493,8 @@ function suiteStatic() {
   const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
   const appjs = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
   check(/\.controls\s*\{[^}]*flex-wrap:\s*wrap/.test(css), 'controls row wraps (no mobile overflow)');
-  check(/overflow-x:\s*auto/.test(css), 'table scrolls horizontally on narrow screens');
+  check(/overflow:\s*auto/.test(css) || /overflow-x:\s*auto/.test(css), 'process table scrolls inside card');
+  check(/\.mobile-meta/.test(css) && /@media\s*\(max-width:\s*720px\)/.test(css), 'mobile process meta layout present');
   check(/:focus-visible\s*\{[^}]*outline:/.test(css), 'keyboard focus-visible ring defined');
   check(/aria-label="Filter apps and processes"/.test(html), 'search input has an accessible label');
   check(/id="offline"[^>]*role="alert"/.test(html), 'offline banner is a live region');
