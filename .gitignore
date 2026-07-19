@@ -1,0 +1,23 @@
+# Runtime state
+.processx-state.json
+
+# Dependencies
+node_modules/
+
+# Swift build products
+.swiftpm/
+.swiftpm-*/
+.build/
+swift/.build/
+swift/build/
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*

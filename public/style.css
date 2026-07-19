@@ -1,0 +1,236 @@
+/* ProcessX — tokens from the validated reference palette (light + dark). */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #6c6a63;
+  --grid: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --accent: #2a78d6;          /* series-1 blue, light */
+  --accent-track: #cde2fb;    /* blue-100: meter track, same ramp */
+  --accent-ink: #ffffff;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --wash: rgba(42, 120, 214, 0.10);
+  --row-hover: rgba(11, 11, 11, 0.035);
+  /* CTA fill (white text rides on it → must clear 4.5:1 in both themes, so it
+     is theme-independent) and text-strength variants of the status hues, tuned
+     to pass AA as *small text* on their tinted chip backgrounds. The base
+     --accent/--good/--warning/--critical stay bright for meters, sparklines and
+     the subtle chip washes; only the readable text uses these. */
+  --btn: #2668cc;
+  --btn-hover: #1f57b0;
+  --accent-strong: #175bb0;
+  --good-ink: #096e09;
+  --warn-ink: #8a5e00;
+  --crit-ink: #b71c1c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5;        /* series-1 blue, dark step */
+    --accent-track: #16304f;
+    --accent-ink: #ffffff;
+    --wash: rgba(57, 135, 229, 0.12);
+    --row-hover: rgba(255, 255, 255, 0.045);
+    /* --btn / --btn-hover are inherited from :root (white-on-blue is the same
+       contrast regardless of surroundings). Status inks flip bright for dark. */
+    --accent-strong: #5ba0f5;
+    --good-ink: #30c14f;
+    --warn-ink: #fab219;
+    --crit-ink: #f47c7c;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--page);
+  color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.icon { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon.sm { width: 15px; height: 15px; }
+
+.wrap { max-width: 1060px; margin: 0 auto; padding: 20px 24px 64px; }
+
+/* ---------------------------------------------------------------- header */
+header { display: flex; align-items: center; gap: 14px; padding: 6px 0 18px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand .icon { width: 24px; height: 24px; }
+.brand h1 { font-size: 19px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+.brand .sub { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+.spacer { flex: 1; }
+
+button {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 13px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+button:hover { background: var(--row-hover); }
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary {
+  background: var(--btn); border-color: transparent; color: var(--accent-ink);
+  font-weight: 600; padding: 9px 16px; border-radius: 9px;
+}
+button.primary:hover { background: var(--btn-hover); }
+button.ghost { background: transparent; }
+button.row-act { padding: 4.5px 10px; font-size: 12.5px; border-radius: 7px; color: var(--ink-2); }
+button.row-act:hover { color: var(--ink); }
+
+/* Keyboard focus — one visible, high-contrast ring for every control. The
+   design otherwise inherits the UA default, which renders inconsistently across
+   buttons, the select and the twist toggles. */
+a:focus-visible, button:focus-visible, input:focus-visible,
+select:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent-strong); outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------ stat tiles */
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 880px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+.tile {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px 13px; min-width: 0;
+}
+.tile .label { color: var(--ink-2); font-size: 12.5px; display: flex; gap: 7px; align-items: center; }
+.tile .label .icon { color: var(--muted); }
+.tile .value { font-size: 27px; font-weight: 600; margin: 5px 0 2px; letter-spacing: -0.01em; }
+.tile .value small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+.tile .foot { color: var(--muted); font-size: 11.5px; margin-top: 7px;
+  display: flex; align-items: center; gap: 6px; min-height: 16px; }
+
+.meter { height: 6px; border-radius: 3px; background: var(--accent-track);
+  overflow: hidden; margin-top: 9px; }
+.meter > i { display: block; height: 100%; border-radius: 3px;
+  background: var(--accent); transition: width 0.5s ease, background 0.3s ease; }
+.meter.warn { background: color-mix(in srgb, var(--warning) 20%, var(--surface)); }
+.meter.warn > i { background: var(--warning); }
+.meter.crit { background: color-mix(in srgb, var(--critical) 20%, var(--surface)); }
+.meter.crit > i { background: var(--critical); }
+
+.spark { width: 100%; height: 34px; display: block; margin-top: 8px; }
+
+.chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 20px;
+  font-size: 11px; font-weight: 600; padding: 2px 8px; line-height: 1.5; }
+.chip .icon { width: 11px; height: 11px; stroke-width: 2.2; }
+.chip.good { color: var(--good-ink); background: color-mix(in srgb, var(--good) 12%, transparent); }
+.chip.warning { color: var(--warn-ink); background: color-mix(in srgb, var(--warning) 16%, transparent); }
+.chip.critical { color: var(--crit-ink); background: color-mix(in srgb, var(--critical) 15%, transparent); }
+.chip.neutral { color: var(--ink-2); background: var(--row-hover); font-weight: 500; }
+.chip.slowed { color: var(--accent-strong); background: var(--wash); }
+.chip.active { color: var(--good-ink); background: color-mix(in srgb, var(--good) 11%, transparent); }
+
+/* -------------------------------------------------------------- controls */
+.controls { display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; margin: 18px 0 10px; }
+.search { position: relative; flex: 1 1 220px; max-width: 320px; }
+.search .icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--muted); width: 15px; height: 15px; }
+.search input {
+  width: 100%; font: inherit; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 12px 7px 32px; outline: none;
+}
+.search input:focus { border-color: var(--accent); }
+select {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
+}
+label.check { display: inline-flex; gap: 7px; align-items: center;
+  color: var(--ink-2); font-size: 13px; cursor: pointer; user-select: none; }
+label.check input { accent-color: var(--accent); }
+
+/* ----------------------------------------------------------------- table */
+.card { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden; }
+/* On narrow screens the five columns can't all fit; let the table scroll
+   horizontally *inside* the card (the page body never scrolls sideways) so the
+   CPU/memory/action columns stay reachable instead of being clipped away. */
+@media (max-width: 720px) {
+  .card { overflow-x: auto; }
+  table { min-width: 600px; }
+}
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  text-align: left; font-size: 11.5px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 10px 14px; border-bottom: 1px solid var(--grid);
+  position: sticky; top: 0; background: var(--surface); z-index: 2;
+}
+th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody td { padding: 8px 14px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.grp:hover { background: var(--row-hover); }
+tbody tr.grp { cursor: default; }
+td.name { display: flex; align-items: center; gap: 9px; min-height: 30px; }
+td.name .twist { width: 18px; height: 18px; display: inline-flex; align-items: center;
+  justify-content: center; color: var(--muted); cursor: pointer; border-radius: 4px;
+  background: transparent; border: none; padding: 0; flex: none; }
+td.name .twist:hover { color: var(--ink); background: var(--row-hover); }
+td.name .twist.leaf { visibility: hidden; }
+td.name .twist .icon { transition: transform 0.15s ease; width: 13px; height: 13px; }
+tr.open td.name .twist .icon { transform: rotate(90deg); }
+td.name .kind { color: var(--muted); }
+.pname { font-weight: 550; }
+.pcount { color: var(--muted); font-size: 12px; }
+.microbar { width: 74px; height: 5px; background: var(--accent-track);
+  border-radius: 2.5px; display: inline-block; vertical-align: middle;
+  margin-left: 10px; overflow: hidden; }
+.microbar > i { display: block; height: 100%; background: var(--accent); border-radius: 2.5px; }
+.microbar.warn { background: color-mix(in srgb, var(--warning) 20%, var(--surface)); }
+.microbar.warn > i { background: var(--warning); }
+.microbar.crit { background: color-mix(in srgb, var(--critical) 20%, var(--surface)); }
+.microbar.crit > i { background: var(--critical); }
+td .dim { color: var(--muted); }
+
+tr.child { background: color-mix(in srgb, var(--page) 55%, var(--surface)); }
+tr.child td { border-bottom: 1px solid color-mix(in srgb, var(--grid) 55%, transparent); font-size: 13px; }
+tr.child td.name { padding-left: 46px; color: var(--ink-2); }
+tr.child .pid { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+tr.more td { color: var(--muted); font-size: 12px; padding-left: 46px; }
+
+.actions-cell { text-align: right; white-space: nowrap; }
+.protected { color: var(--muted); font-size: 12px; display: inline-flex; gap: 5px; align-items: center; }
+
+.empty { padding: 34px; text-align: center; color: var(--muted); }
+
+footer { color: var(--muted); font-size: 12px; margin-top: 16px; line-height: 1.6; }
+footer strong { color: var(--ink-2); font-weight: 600; }
+
+/* ----------------------------------------------------------------- toast */
+#toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(8px);
+  background: var(--ink); color: var(--page);
+  border-radius: 10px; padding: 11px 16px; font-size: 13.5px;
+  display: flex; gap: 14px; align-items: center;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  opacity: 0; pointer-events: none; transition: opacity 0.18s ease, transform 0.18s ease;
+  max-width: 640px; z-index: 50;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+#toast button { background: transparent; border: none; color: inherit;
+  font-weight: 700; padding: 2px 4px; }
+#toast button:hover { text-decoration: underline; background: transparent; }
+
+#offline { display: none; margin: 10px 0; padding: 10px 14px; border-radius: 10px;
+  border: 1px solid var(--border); color: var(--critical);
+  background: color-mix(in srgb, var(--critical) 8%, var(--surface)); font-size: 13px; }
+#offline.show { display: block; }

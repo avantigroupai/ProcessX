@@ -1,0 +1,123 @@
+# ProcessX
+
+A macOS process & priority monitor with one-click reprioritization and a
+**QuickFast** button that makes an overloaded Mac responsive again.
+
+![ProcessX](https://img.shields.io/badge/macOS-taskpolicy-blue)
+
+## Run it
+
+```sh
+node server.js          # -> http://localhost:4747
+```
+
+No dependencies, no admin rights, nothing to install.
+
+## What it does
+
+- **Live monitor** — CPU, GPU (device utilization), memory + memory-pressure and
+  swap, sampled every 2 s. Processes are grouped per app the way Activity
+  Monitor does it (Chrome + its 100 helpers = one row), and terminal-hosted CLI
+  sessions (e.g. a `claude` Code session) surface as their own top-level rows
+  instead of hiding inside "Terminal".
+- **Browser tabs** — expanding a browser row lists its renderer processes
+  ("tab / page"), so one heavy tab can be slowed without touching the browser.
+  (macOS does not expose tab *titles* per renderer without a debugging port, so
+  rows are identified by renderer PID.)
+- **One-click "Slow down"** — moves a process (or a whole app group) into
+  macOS's background resource band via `taskpolicy -b -p PID`. The scheduler
+  throttles its CPU, disk I/O and timers. **Fully reversible** with "Restore"
+  (`taskpolicy -B`) — which is why ProcessX uses taskpolicy instead of `renice`
+  (a nice value can never be lowered back without root).
+- **QuickFast** — one click to make the system snappy: pushes background hogs
+  into the low-priority band. Targets processes matching *claude / cowork /
+  anthropic* (Claude Desktop, Claude Code, Cowork sessions) plus anything else
+  using ≥ 25 % of a core in the background. It never touches:
+  - the frontmost app (what you're actively using),
+  - protected system processes (WindowServer, Finder, coreaudiod, …),
+  - media / call apps (Music, Spotify, Zoom, Teams, FaceTime, …),
+  - processes owned by other users,
+  - ProcessX itself.
+  Everything QuickFast does is listed in a toast and undone by **Restore all**.
+- **Auto-tame (watchdog)** — optional setting ("Auto-tame background hogs").
+  When ON, any *background* process that stays above the CPU threshold for
+  ~8 s (3 consecutive ticks) is moved to the background band automatically —
+  the classic case being an `ffmpeg` encode that should finish quietly on the
+  efficiency cores instead of starving the UI. Bringing an auto-tamed app to
+  the foreground restores it instantly (focus rescue), and a manually restored
+  process gets a 10-minute cooldown so the watchdog never fights you. The same
+  protected/media/foreground exclusions as QuickFast apply.
+- **Persistence** — applied throttles are recorded in `.processx-state.json`
+  (with the process's command path, so a reused PID is never mis-restored) and
+  survive a server restart. Records for exited processes are pruned
+  automatically.
+
+## API
+
+| Endpoint | Body | Effect |
+|---|---|---|
+| `GET /api/snapshot` | — | full system snapshot (`?f=1` forces a fresh sample) |
+| `POST /api/quickfast` | `{ "dry": true? }` | apply (or preview) QuickFast |
+| `POST /api/deprioritize` | `{ "pids": [..] }` or `{ "group": "a:Google Chrome" }` | background band |
+| `POST /api/restore` | `{ "pids": [..] }`, `{ "group": .. }` or `{ "all": true }` | lift back out |
+| `GET/POST /api/config` | `{ "auto": bool, "cpuThreshold": 5..100 }` | read / change settings |
+
+## Security model
+
+The server binds `127.0.0.1` only, but loopback is still reachable from any page
+in your browser — so every state-changing `POST` is gated by an Origin /
+`Sec-Fetch-Site` / `application/json` check (`crossSite()` in `server.js`). That
+blocks the CSRF vector where a malicious site silently throttles your processes.
+Every `/api/*` route (reads included) also validates the `Host` header
+(`badHost()`): a DNS-rebinding page — one that repoints its own domain at
+`127.0.0.1` so the browser treats it as same-origin, defeating the Origin /
+`Sec-Fetch-Site` check — still carries its own domain in `Host`, so it is
+rejected before it can read your process list or issue an action. Forced samples
+(`?f=1`) are rate-floored so a hostile loop can't burn CPU sampling. There is
+deliberately **no authentication**: ProcessX can only affect processes you
+already own, which any local process running as you could do by calling
+`taskpolicy` directly.
+
+## Known limitations
+
+- **PID reuse (TOCTOU):** between sampling and the `taskpolicy` call there is a
+  millisecond-wide window where a PID could die and be recycled. Persisted
+  records are identity-checked (stored `comm` vs live `comm`) on every sample,
+  so a stale record is dropped rather than acted on — but the throttle itself is
+  not transactional. In practice this requires PID wraparound inside that
+  window.
+- **GPU is system-wide**, not per process: macOS doesn't expose per-process GPU
+  utilization without admin rights.
+- **Browser tabs are identified by renderer PID**, not page title — reading tab
+  titles would require attaching to each browser's debug port.
+
+## Tuning
+
+QuickFast's name patterns and CPU threshold are constants at the top of
+`server.js` (`QF_PATTERNS`, `QF_CPU_THRESHOLD`), as are the protected-process
+(`CRITICAL`) and media-safe (`MEDIA_SAFE`) lists.
+
+## QA
+
+```sh
+node qa/qa.mjs            # full suite (spawns an isolated throwaway server)
+node qa/qa.mjs --only=sec # only the security suites
+```
+
+A zero-dependency harness ([`qa/qa.mjs`](qa/qa.mjs)) that spins up its own server
+on a private port with an isolated state file (never touching your real
+`.processx-state.json`) and runs ~160 checks across eight areas:
+
+- **API contract** — snapshot / config shape, cache headers, 404s, static serving.
+- **CSRF** — the full `Sec-Fetch-Site` / `Origin` / `Content-Type` matrix across
+  every state-changing endpoint.
+- **DNS rebinding** — foreign `Host` rejected on reads and writes; loopback allowed.
+- **Path traversal** — encoded/`..`/backslash payloads can't escape `public/`.
+- **Fuzzing** — junk pids, malformed JSON, oversized bodies, out-of-range config.
+- **Performance** — cached/forced sample latency, concurrent-sample coalescing.
+- **End-to-end** — spawns a *sacrificial* busy process, throttles and restores it
+  through the real `taskpolicy` path, and asserts the state file and self-guard.
+- **Accessibility** — WCAG AA contrast computed straight from the CSS tokens (both
+  themes), plus responsive/a11y/i18n static invariants.
+
+The E2E suite only ever throttles a process the harness spawns itself.

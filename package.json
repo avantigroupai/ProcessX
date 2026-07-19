@@ -1,0 +1,12 @@
+{
+  "name": "processx",
+  "version": "1.0.0",
+  "description": "macOS process & priority monitor with one-click deprioritization and QuickFast",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,163 @@
+import Foundation
+
+enum GroupKind: String { case app, cli, daemon }
+
+struct ProcGroup: Identifiable {
+    var key: String
+    var name: String
+    var kind: GroupKind
+    /// For a terminal-hosted CLI: the key of the terminal app hosting it.
+    var parentKey: String?
+    var cpu: Double = 0
+    var mem: UInt64 = 0
+    var procs: [ProcSample] = []
+    var isSystem: Bool = true
+    var isCritical: Bool = false
+    var id: String { key }
+
+    var count: Int { procs.count }
+    /// Processes the kernel currently has in the low-priority band — for ANY
+    /// reason. Browsers park their own background tabs here, so this is NOT a
+    /// count of what *we* throttled; that lives in ThrottleStore. Used only to
+    /// detect drift, never to label a row "slowed".
+    var inBackgroundBand: Int { procs.filter { $0.priority <= Sampler.bgBand }.count }
+    var actionable: Bool { !isCritical && !isSystem }
+}
+
+struct Model {
+    var groups: [ProcGroup] = []
+    var byPID: [pid_t: ProcSample] = [:]
+    var frontKey: String?
+
+    /// A process is "in the foreground" if its group is frontmost, OR it's a
+    /// terminal-hosted CLI whose host terminal is frontmost.
+    ///
+    /// Without the parentKey hop a `claude`/`cowork` session — the thing this app
+    /// exists to tame — never registers as focused, because its group is c:<pid>
+    /// while the frontmost app group is a:<Terminal>. That blind spot would both
+    /// throttle a session you're actively using and break its focus rescue.
+    func isFront(_ groupKey: String) -> Bool {
+        guard let front = frontKey else { return false }
+        if groupKey == front { return true }
+        return groups.first { $0.key == groupKey }?.parentKey == front
+    }
+
+    func group(for key: String) -> ProcGroup? { groups.first { $0.key == key } }
+}
+
+enum Grouping {
+
+    /// Safari's tab processes are XPC services reparented away from Safari, so they
+    /// land in a daemon group named "com.apple.WebKit.WebContent". Say what it is.
+    static func daemonName(_ base: String) -> String {
+        switch base {
+        case "com.apple.WebKit.WebContent": return "Web pages (Safari tabs)"
+        case "com.apple.WebKit.GPU": return "Web pages (GPU)"
+        case "com.apple.WebKit.Networking": return "Web pages (networking)"
+        default: return base
+        }
+    }
+
+    /// "/Applications/Foo.app/Contents/MacOS/Foo" -> "Foo"
+    static func appName(of path: String) -> String? {
+        guard let r = path.range(of: #"/([^/]+)\.app/"#, options: .regularExpression) else { return nil }
+        let seg = String(path[r]).dropFirst().dropLast()          // "Foo.app"
+        return String(seg.dropLast(4))                            // "Foo"
+    }
+
+    static func baseName(_ p: String) -> String {
+        var b = (p as NSString).lastPathComponent
+        if b.hasPrefix("-") { b.removeFirst() }                    // "-zsh" -> "zsh"
+        return b
+    }
+
+    /// Group processes the way Activity Monitor does — one row per app, with all
+    /// its helpers folded in — except that terminal-hosted CLI sessions get their
+    /// own row instead of hiding inside "Terminal".
+    static func build(procs: [ProcSample], frontPID: pid_t?, myUID: uid_t) -> Model {
+        var byPID: [pid_t: ProcSample] = [:]
+        for p in procs { byPID[p.pid] = p }
+
+        var groups: [String: ProcGroup] = [:]
+        var order: [String] = []
+
+        func assign(_ p: ProcSample, key: String, name: String, kind: GroupKind, parentKey: String?) {
+            if groups[key] == nil {
+                groups[key] = ProcGroup(key: key, name: name, kind: kind, parentKey: parentKey,
+                                        isCritical: Policy.critical.contains(name))
+                order.append(key)
+            }
+            groups[key]!.cpu += p.cpuPct
+            groups[key]!.mem += p.rss
+            if p.uid == myUID { groups[key]!.isSystem = false }
+            var pp = p
+            pp.groupKey = key
+            groups[key]!.procs.append(pp)
+            byPID[p.pid]!.groupKey = key
+        }
+
+        for p in procs where p.pid != 0 {
+            // Walk up to (not including) launchd.
+            var chain: [ProcSample] = [p]
+            var cur = p
+            var guardCount = 0
+            while guardCount < 40, let parent = byPID[cur.ppid], parent.pid > 1, parent.pid != cur.pid {
+                chain.append(parent)
+                cur = parent
+                guardCount += 1
+            }
+
+            // The app bundle closest to launchd owns the tree:
+            // "Chrome Helper (Renderer)" belongs to "Google Chrome".
+            var appIdx: Int?
+            for i in stride(from: chain.count - 1, through: 0, by: -1) where appName(of: chain[i].path) != nil {
+                appIdx = i
+                break
+            }
+
+            if let ai = appIdx, let app = appName(of: chain[ai].path) {
+                if Policy.terminals.contains(app) {
+                    // First non-shell process below the terminal is the session root.
+                    var sessionIdx: Int?
+                    for i in stride(from: ai - 1, through: 0, by: -1)
+                    where !Policy.shells.contains(baseName(chain[i].path)) {
+                        sessionIdx = i
+                        break
+                    }
+                    if let si = sessionIdx {
+                        assign(p, key: "c:\(chain[si].pid)", name: cliTitle(chain[si]),
+                               kind: .cli, parentKey: "a:\(app)")
+                        continue
+                    }
+                }
+                assign(p, key: "a:\(app)", name: app, kind: .app, parentKey: nil)
+            } else {
+                let b = baseName(p.path)
+                assign(p, key: "d:\(b)", name: daemonName(b), kind: .daemon, parentKey: nil)
+            }
+        }
+
+        var frontKey: String?
+        if let fp = frontPID, let fproc = byPID[fp] { frontKey = fproc.groupKey }
+
+        var model = Model(byPID: byPID, frontKey: frontKey)
+        model.groups = order.compactMap { groups[$0] }
+        return model
+    }
+
+    /// "node" running "cli.js" reads as "node cli.js" rather than a bare "node".
+    static func cliTitle(_ p: ProcSample) -> String {
+        let b = baseName(p.path)
+        return b
+    }
+
+    /// Row label for one process inside a group.
+    static func label(_ p: ProcSample) -> String {
+        let b = baseName(p.path)
+        if p.path.contains("com.apple.WebKit.WebContent") { return "Web page (tab process)" }
+        if p.path.contains("com.apple.WebKit.GPU") { return "Browser GPU process" }
+        if p.path.contains("com.apple.WebKit.Networking") { return "Browser networking" }
+        if b.hasSuffix("Helper (Renderer)") { return b + " — tab / page" }
+        return b
+    }
+}
