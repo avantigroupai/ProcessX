@@ -49,7 +49,49 @@ BUILD_STAMP="$(date +%Y.%m%d.%H%M)"
 plutil -replace CFBundleVersion -string "$BUILD_STAMP" "$APP/Contents/Info.plist"
 echo "build stamp: $BUILD_STAMP"
 
-# Ad-hoc sign so macOS will run it locally without a developer certificate.
-codesign --force --deep --sign - "$APP" 2>/dev/null || echo "note: ad-hoc signing skipped"
+# Signing.
+#
+# Ad-hoc (`--sign -`) is enough to run locally, but a downloaded ad-hoc bundle is
+# refused outright by Gatekeeper. A Developer ID signature alone is not enough
+# either — since Catalina, unnotarized downloads still get "Apple cannot check it
+# for malicious software". Only signed + notarized + stapled opens cleanly, so
+# that is the default whenever the certificate is present.
+#
+# Override the identity with SIGN_ID, or force the local path with SIGN_ID=-.
+SIGN_ID="${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
+  | awk -F'"' '/Developer ID Application/ {print $2; exit}')}"
+
+if [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ]; then
+  # --options runtime is mandatory for notarization. --timestamp too: without a
+  # secure timestamp the signature stops validating when the cert expires.
+  # No --deep: Apple deprecated it, and this bundle is a single executable.
+  codesign --force --sign "$SIGN_ID" --options runtime --timestamp \
+           "$APP/Contents/MacOS/ProcessX"
+  codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$APP"
+  echo "signed: $SIGN_ID"
+else
+  codesign --force --sign - "$APP" 2>/dev/null || echo "note: ad-hoc signing skipped"
+  echo "signed: ad-hoc (local use only — a download would be blocked)"
+fi
+
+codesign --verify --strict --verbose=2 "$APP" 2>&1 | sed 's/^/  /'
+
+# Notarization. Requires credentials stored once by a human:
+#   xcrun notarytool store-credentials notarytool --apple-id you@example.com --team-id TEAMID
+# Skipped silently when they are absent, so a plain local build stays fast.
+if [ "${NOTARIZE:-auto}" != "no" ] && [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ] \
+   && security find-generic-password -s "com.apple.gke.notary.tool" >/dev/null 2>&1; then
+  ZIP="build/ProcessX-notarize.zip"
+  ditto -c -k --keepParent "$APP" "$ZIP"
+  echo "notarizing (this waits on Apple, typically 1–5 minutes)…"
+  if xcrun notarytool submit "$ZIP" --keychain-profile notarytool --wait; then
+    xcrun stapler staple "$APP" && echo "stapled: ticket attached, opens with no warning"
+  else
+    echo "note: notarization failed — the app is signed but a download will warn"
+  fi
+  rm -f "$ZIP"
+elif [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ]; then
+  echo "note: not notarized (no 'notarytool' keychain profile) — a download will warn"
+fi
 
 echo "built: $(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
