@@ -61,6 +61,22 @@ caps) live in `policy.json` and are loaded by the Node server under `lib/`.
   the foreground restores it instantly (focus rescue), and a manually restored
   process gets a 10-minute cooldown so the watchdog never fights you. The same
   protected/media/foreground exclusions as QuickFast apply.
+- **Hard CPU cap (native app only, opt-in)** — set from the speedometer menu on
+  an app row: "Cap at 25% of a core" holds that app's whole process group under the
+  number. This is the one action that *suspends*: macOS exposes no per-process
+  CPU quota (`RLIMIT_CPU_USAGE_MONITOR` reports a breach, it can't hold a process
+  under one), so a cap is duty-cycled `SIGSTOP`/`SIGCONT` with a closed loop that
+  measures the group's real CPU each 200 ms period and adjusts the run window.
+  Because a suspended app can't respond, it's gated harder than everything else:
+  never the foreground app, never system, media or call apps, never terminals or
+  shells, never a process something else already suspended, released instantly
+  when you bring the app to the front, and shown behind a one-time explainer.
+  Crash safety is three-layered — the pid list is written to disk *before* the
+  first `SIGSTOP`, a signal handler resumes everything on any catchable fatal
+  signal, and a detached guardian process (`ProcessX --cap-guardian`) waits on the
+  app's exit via `kqueue` and resumes for it after a `SIGKILL`. Deliberately not
+  in the Node build: an HTTP endpoint that can freeze applications is a worse idea
+  than a menu item.
 - **Persistence** — applied throttles are recorded in `.processx-state.json`
   (with the process's command path, so a reused PID is never mis-restored) and
   survive a server restart. Records for exited processes are pruned
@@ -104,6 +120,11 @@ do by calling `taskpolicy` directly.
   window.
 - **GPU is system-wide**, not per process: macOS doesn't expose per-process GPU
   utilization without admin rights.
+- **A cap can't hold a process below ~2 % of its unconstrained usage.** Every
+  capped group keeps a sliver of each duty cycle so it is never frozen outright,
+  which puts a floor under how low a cap can go. A capped app is also genuinely
+  unresponsive while suspended — sockets can time out and timers drift — which is
+  inherent to the technique, not a bug in this implementation.
 - **Browser tabs are identified by renderer PID**, not page title — reading tab
   titles would require attaching to each browser's debug port.
 

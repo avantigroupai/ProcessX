@@ -23,7 +23,7 @@ the Trash (settings live in `defaults delete local.processx`).
 ## Verify
 
 ```sh
-swift run -c release ProcessX --selftest        # 30 checks, real syscalls
+swift run -c release ProcessX --selftest        # 59 checks, real syscalls
 swift run -c release ProcessX --render out.png --dark   # rasterise the UI
 ```
 
