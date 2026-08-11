@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-3TGDLJT5CC"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-3TGDLJT5CC');
+</script>
+<title>ProcessX — macOS process monitor that makes a busy Mac responsive again (free, open source)</title>
+<meta name="description" content="ProcessX is a free, open-source macOS process and priority monitor. One click moves CPU hogs into the macOS background band — fully reversible — so the app you're actually using stays snappy. A free App Tamer alternative and a real fix for a slow Mac, without admin rights.">
+<meta name="keywords" content="mac process monitor, macOS CPU hog, how to fix a slow Mac, limit CPU usage macOS, throttle process mac, taskpolicy macOS, macOS background band, Activity Monitor alternative, App Tamer alternative, iStat Menus alternative, mac menu bar CPU monitor, renice mac, deprioritize process macOS, stop Chrome using CPU mac, open source mac process manager">
+<link rel="canonical" href="https://avantigroupai.github.io/processx-web/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ProcessX — macOS process &amp; priority monitor">
+<meta property="og:description" content="Free, open-source macOS process monitor. One click pushes CPU hogs into the background band — reversible, no admin rights — and your Mac is responsive again.">
+<meta property="og:url" content="https://avantigroupai.github.io/processx-web/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="alternate" type="text/plain" href="/processx-web/llms.txt" title="LLM-readable summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233987e5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 12h-4l-3 8L9 4l-3 8H2'/%3E%3C/svg%3E">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://avantigroupai.github.io/processx-web/#app",
+      "name": "ProcessX",
+      "alternateName": ["ProcessX for Mac", "ProcessX process monitor"],
+      "applicationCategory": "UtilitiesApplication",
+      "applicationSubCategory": "System monitor / process priority manager",
+      "operatingSystem": "macOS (native menu-bar app requires macOS 26; the local web app runs on macOS with Node 18+)",
+      "processorRequirements": "Apple Silicon or Intel",
+      "description": "Free, open-source macOS process and priority monitor. Shows live CPU, GPU and memory, groups processes per app the way Activity Monitor does, and moves CPU hogs into the macOS background resource band with one click — fully reversible, no admin rights, no telemetry. Ships as a native Swift menu-bar app and as a zero-dependency local web app.",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "downloadUrl": "https://github.com/avantigroupai/ProcessX",
+      "softwareVersion": "1.1.0",
+      "datePublished": "2026-08-11",
+      "isAccessibleForFree": true,
+      "license": "https://github.com/avantigroupai/ProcessX",
+      "codeRepository": "https://github.com/avantigroupai/ProcessX",
+      "programmingLanguage": ["Swift", "JavaScript"],
+      "url": "https://avantigroupai.github.io/processx-web/",
+      "featureList": [
+        "QuickFast: one click moves background CPU hogs into the macOS low-priority band",
+        "Fully reversible throttling via the background resource band instead of renice",
+        "Auto-tame watchdog moves sustained background hogs down automatically and restores them on focus",
+        "Processes grouped per app the way Activity Monitor groups them, with CLI sessions surfaced separately",
+        "Browser rows expand to real open tabs by name so a single heavy tab can be slowed",
+        "Never touches the frontmost app, protected system processes, media and call apps, or other users' processes",
+        "Native Swift menu-bar build makes zero subprocesses per sample",
+        "No admin rights, no telemetry, no network calls, no background agents"
+      ],
+      "privacyPolicy": "https://github.com/avantigroupai/ProcessX#readme"
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://avantigroupai.github.io/processx-web/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "How do I stop an app from hogging the CPU on a Mac?",
+          "acceptedAnswer": { "@type": "Answer", "text": "macOS has a background resource band: a scheduling tier where a process gets CPU, disk I/O and timer priority only when nothing in the foreground wants them. ProcessX moves a chosen process, or a whole app group, into that band with one click and lifts it back out with another. The process keeps running and keeps making progress — it simply stops competing with whatever you are actually using. No admin rights are needed because you can only affect processes you already own." }
+        },
+        {
+          "@type": "Question",
+          "name": "Why does my Mac get slow when Chrome or an AI assistant is running?",
+          "acceptedAnswer": { "@type": "Answer", "text": "macOS schedules by default as if every process deserves equal CPU. A build, an encode, a browser with sixty tabs or a long-running AI coding session will happily take every core it can get, and the app in front of you is left fighting for the same cores. Quitting the heavy process is destructive and pausing it stops the work. ProcessX changes its scheduling priority instead, so the work continues quietly in the background." }
+        },
+        {
+          "@type": "Question",
+          "name": "Is ProcessX a free alternative to App Tamer?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. App Tamer is a well-regarded paid macOS utility that slows CPU-hungry apps by repeatedly stopping and resuming them. ProcessX is free and open source and takes a different approach: it moves processes into the macOS background resource band and lets the kernel scheduler do the work, so the process is never suspended and the change is a single reversible call." }
+        },
+        {
+          "@type": "Question",
+          "name": "Why does ProcessX use taskpolicy instead of renice?",
+          "acceptedAnswer": { "@type": "Answer", "text": "A nice value can be raised without privileges but never lowered back again without root, so renice is a one-way door: you can slow a process down and then cannot undo it. The macOS background band, set with taskpolicy -b or setpriority with PRIO_DARWIN_BG, is fully reversible by the same unprivileged user, and it throttles disk I/O and timer coalescing as well as CPU. That reversibility is the whole reason ProcessX uses it." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does ProcessX need admin rights or a kernel extension?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. There is no installer, no kernel extension, no background daemon and no password prompt. ProcessX only changes the scheduling priority of processes owned by the user running it — exactly what that user could already do from a terminal." }
+        },
+        {
+          "@type": "Question",
+          "name": "Can ProcessX slow down a single browser tab?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. Expanding a browser row lists its renderer processes, and in the native app scriptable browsers — Chrome and its Chromium siblings plus Safari — are asked over Apple Events for their real open tabs by name. One runaway tab can be pushed into the background band without touching the rest of the browser." }
+        },
+        {
+          "@type": "Question",
+          "name": "What does ProcessX refuse to touch?",
+          "acceptedAnswer": { "@type": "Answer", "text": "The frontmost application, including a command-line tool running in the frontmost terminal; protected system processes such as WindowServer, Finder and coreaudiod; media and call applications such as Music, Spotify, Zoom, Teams and FaceTime; processes owned by other users; and ProcessX itself. Every automatic action is listed and can be undone with a single Restore all." }
+        },
+        {
+          "@type": "Question",
+          "name": "Does ProcessX send my data anywhere?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. There is no telemetry, no account and no network call. The native menu-bar app reads process information straight from the kernel. The optional local web app binds to 127.0.0.1 only and is hardened against cross-site requests and DNS rebinding so no web page can read your process list or throttle anything." }
+        }
+      ]
+    }
+  ]
+}
+</script>
+<style>
+  :root {
+    --bg: #0c0c0f;
+    --bg-2: #111116;
+    --pane: #16161c;
+    --pane-2: #1c1c24;
+    --line: rgba(255,255,255,0.08);
+    --line-strong: rgba(255,255,255,0.14);
+    --ink: #f4f4f7;
+    --ink-2: #b9bac2;
+    --ink-3: #85868f;
+    --ink-4: #55565e;
+    --accent: #3987e5;
+    --accent-soft: rgba(57,135,229,0.16);
+    --radius: 16px;
+    --maxw: 1120px;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f6f8;
+      --bg-2: #eeeef1;
+      --pane: #ffffff;
+      --pane-2: #f2f2f5;
+      --line: rgba(0,0,0,0.08);
+      --line-strong: rgba(0,0,0,0.14);
+      --ink: #16161a;
+      --ink-2: #3f4048;
+      --ink-3: #64656e;
+      --ink-4: #9a9ba3;
+      --accent: #2a78d6;
+      --accent-soft: rgba(42,120,214,0.12);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  svg { display: block; }
+  .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 32px; }
+  .icon { width: 1em; height: 1em; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- Nav ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 650; font-size: 17px; letter-spacing: -0.01em; }
+  .brand .glyph { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(160deg, #2a2a31, #101014); border: 1px solid var(--line-strong); display: grid; place-items: center; flex: none; }
+  .brand .glyph svg { width: 15px; height: 15px; color: #f4f4f7; }
+  .nav-links { display: flex; align-items: center; gap: 30px; }
+  .nav-links a { color: var(--ink-2); font-size: 14.5px; font-weight: 500; transition: color .15s; }
+  .nav-links a:hover { color: var(--ink); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font); font-size: 14.5px; font-weight: 600;
+    padding: 10px 18px; border-radius: 10px; cursor: pointer; border: 1px solid transparent;
+    transition: transform .12s ease, background .15s, border-color .15s;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: color-mix(in srgb, var(--accent) 88%, #fff); }
+  .btn-ghost { background: transparent; border-color: var(--line-strong); color: var(--ink); }
+  .btn-ghost:hover { background: var(--pane); }
+  @media (max-width: 860px) { .nav-links a:not(.btn) { display: none; } }
+
+  /* ---------- Hero ---------- */
+  header.hero { padding: 92px 0 72px; position: relative; }
+  header.hero::before {
+    content: ""; position: absolute; inset: 0; z-index: -1;
+    background: radial-gradient(680px 380px at 50% -8%, var(--accent-soft), transparent 70%);
+    pointer-events: none;
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; letter-spacing: .01em; color: var(--ink-2);
+    padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--pane);
+    margin-bottom: 26px;
+  }
+  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  h1 {
+    font-size: clamp(38px, 6vw, 66px); line-height: 1.04; letter-spacing: -0.03em; font-weight: 680;
+    max-width: 17ch; margin-bottom: 26px;
+  }
+  h1 .muted { color: var(--ink-3); }
+  .lede { font-size: clamp(17px, 2.1vw, 21px); color: var(--ink-2); max-width: 58ch; margin-bottom: 36px; }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .hero-cta .btn { padding: 13px 24px; font-size: 15.5px; }
+  .hero-note { margin-top: 20px; font-size: 13.5px; color: var(--ink-3); display: flex; gap: 20px; flex-wrap: wrap; }
+  .hero-note span { display: inline-flex; align-items: center; gap: 7px; }
+  .hero-note .icon { width: 15px; height: 15px; color: var(--ink-3); }
+
+  /* ---------- App mockup ---------- */
+  .shot { margin-top: 64px; }
+  .window {
+    border-radius: 14px; overflow: hidden; border: 1px solid var(--line-strong);
+    background: var(--bg-2);
+    box-shadow: 0 40px 90px -30px rgba(0,0,0,0.6), 0 8px 24px -12px rgba(0,0,0,0.4);
+  }
+  .titlebar { height: 42px; display: flex; align-items: center; gap: 8px; padding: 0 16px; background: var(--pane); border-bottom: 1px solid var(--line); }
+  .traffic { display: flex; gap: 8px; }
+  .traffic i { width: 12px; height: 12px; border-radius: 50%; background: var(--ink-4); opacity: .5; }
+  .titlebar .title { flex: 1; text-align: center; font-size: 13px; font-weight: 600; color: var(--ink-3); display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+  .titlebar .title .icon { width: 13px; height: 13px; }
+  .app { padding: 16px; display: grid; gap: 14px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .tile { background: var(--pane); border: 1px solid var(--line); border-radius: 11px; padding: 13px 15px; }
+  .tile .lab { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--ink-2); }
+  .tile .lab .icon { width: 13px; height: 13px; color: var(--ink-3); }
+  .tile .val { font-size: 24px; font-weight: 660; letter-spacing: -0.02em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .tile .val small { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+  .tile .meter { height: 6px; border-radius: 3px; background: var(--accent-soft); margin-top: 9px; overflow: hidden; }
+  .tile .meter i { display: block; height: 100%; background: var(--accent); }
+  .tile .ft { font-size: 10.5px; color: var(--ink-4); margin-top: 7px; }
+  @media (max-width: 720px) { .tiles { grid-template-columns: 1fr 1fr; } }
+
+  .ptable { background: var(--pane); border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
+  .ptable .hd, .ptable .r { display: grid; grid-template-columns: 1fr 74px 78px 96px 92px; align-items: center; gap: 10px; padding: 9px 15px; }
+  .ptable .hd { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-4); border-bottom: 1px solid var(--line); background: var(--pane-2); }
+  .ptable .r { border-bottom: 1px solid var(--line); font-size: 13px; }
+  .ptable .r:last-child { border-bottom: none; }
+  .ptable .r.on { background: var(--accent-soft); }
+  .ptable .nm { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .ptable .nm .icon { width: 15px; height: 15px; color: var(--ink-3); flex: none; }
+  .ptable .nm .icon.tw { width: 11px; height: 11px; color: var(--ink-4); }
+  .ptable .nm b { font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ptable .nm span { color: var(--ink-4); font-size: 11.5px; white-space: nowrap; }
+  .ptable .nm.sub { padding-left: 22px; }
+  .ptable .num { text-align: right; font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .ptable .num.hot { color: var(--ink); font-weight: 650; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--ink-3); white-space: nowrap; }
+  .chip.bg { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-soft); }
+  .act { justify-self: end; font-size: 11.5px; font-weight: 600; color: var(--ink-2); border: 1px solid var(--line-strong); border-radius: 7px; padding: 4px 11px; white-space: nowrap; }
+  .act.p { color: #fff; background: var(--accent); border-color: transparent; }
+  @media (max-width: 820px) {
+    .ptable .hd, .ptable .r { grid-template-columns: 1fr 64px 84px; }
+    .ptable .c-mem, .ptable .c-prio { display: none; }
+  }
+
+  /* ---------- Sections ---------- */
+  section { padding: 96px 0; border-top: 1px solid var(--line); }
+  .sec-head { max-width: 64ch; margin-bottom: 56px; }
+  .kicker { font-size: 13px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); margin-bottom: 16px; }
+  h2 { font-size: clamp(28px, 4vw, 42px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 660; margin-bottom: 18px; }
+  .sec-head p { font-size: 18px; color: var(--ink-2); }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+  .card { background: var(--pane); border: 1px solid var(--line); border-radius: var(--radius); padding: 32px; }
+  .card h3 { font-size: 19px; font-weight: 640; margin-bottom: 12px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
+  .card h3 .icon { width: 20px; height: 20px; color: var(--ink); flex: none; }
+  .card p { color: var(--ink-2); font-size: 15px; }
+  .card p + p { margin-top: 12px; }
+  .card.bad { opacity: .82; }
+  .card .tag { font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 16px; }
+  .card.good .tag { color: var(--accent); }
+  .formula { margin-top: 20px; font-family: var(--mono); font-size: 13px; color: var(--ink-2); background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; line-height: 1.7; }
+  .formula b { color: var(--ink); }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .feat { background: var(--pane); border: 1px solid var(--line); border-radius: var(--radius); padding: 30px 28px; transition: border-color .18s, transform .18s; }
+  .feat:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+  /* Bare icons, no container chrome: the glyph aligns flush with the heading below it. */
+  .feat .ib { display: flex; align-items: center; margin-bottom: 22px; }
+  /* stroke-width is in the 24-unit viewBox, so it scales with the icon —
+     trimmed from the 1.6 base so a 32px glyph does not read as heavy. */
+  .feat .ib .icon { width: 32px; height: 32px; color: var(--ink); stroke-width: 1.4; }
+  .feat h3 { font-size: 17.5px; font-weight: 640; margin-bottom: 10px; letter-spacing: -0.01em; }
+  .feat p { color: var(--ink-2); font-size: 14.5px; }
+  kbd { font-family: var(--mono); font-size: 11.5px; background: var(--pane-2); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 6px; padding: 2px 7px; color: var(--ink); }
+  .mono { font-family: var(--mono); font-size: 0.92em; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+  @media (max-width: 760px) { .stats { grid-template-columns: 1fr 1fr; gap: 32px; } }
+  .stat .n { font-size: clamp(34px, 5vw, 52px); font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+  .stat .n small { font-size: 0.5em; font-weight: 600; color: var(--ink-3); letter-spacing: 0; }
+  .stat .l { margin-top: 12px; font-size: 14px; color: var(--ink-2); }
+  .stat .s { font-size: 12.5px; color: var(--ink-4); margin-top: 2px; }
+
+  .keys { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+  .keys .krow { display: inline-flex; align-items: center; gap: 10px; background: var(--pane); border: 1px solid var(--line); border-radius: 10px; padding: 11px 16px; font-size: 14px; color: var(--ink-2); }
+
+  .pipe { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
+  @media (max-width: 820px) { .pipe { grid-template-columns: 1fr; } }
+  .step { background: var(--pane); border: 1px solid var(--line); border-radius: var(--radius); padding: 30px 28px; }
+  .step .num { font-family: var(--mono); font-size: 12.5px; color: var(--accent); font-weight: 600; margin-bottom: 16px; }
+  .step h3 { font-size: 17.5px; font-weight: 640; margin-bottom: 10px; }
+  .step p { color: var(--ink-2); font-size: 14.5px; }
+  .step .agents { margin-top: 18px; font-size: 12.5px; color: var(--ink-4); display: flex; align-items: center; gap: 8px; }
+  .step .agents .icon { width: 14px; height: 14px; }
+
+  .cta-band { text-align: center; }
+  .cta-band h2 { max-width: 20ch; margin: 0 auto 20px; }
+  .cta-band p { max-width: 56ch; margin: 0 auto 34px; color: var(--ink-2); font-size: 18px; }
+  .cta-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .cta-actions .btn { padding: 14px 28px; font-size: 15.5px; }
+  .codeblock { max-width: 620px; margin: 20px auto 0; text-align: left; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; font-family: var(--mono); font-size: 13px; color: var(--ink-2); line-height: 1.9; overflow-x: auto; white-space: pre; }
+  .codeblock .c { color: var(--ink-4); }
+  .codeblock .p { color: var(--accent); }
+  .install { max-width: 640px; margin: 44px auto 0; text-align: left; }
+  .install h3 { font-size: 17px; font-weight: 640; margin-bottom: 10px; }
+  .install p { color: var(--ink-2); font-size: 14.5px; }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--pane); }
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 880px; }
+  table.cmp th, table.cmp td { text-align: left; padding: 16px 20px; vertical-align: top; border-bottom: 1px solid var(--line); }
+  table.cmp th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); font-weight: 650; background: var(--pane-2); }
+  table.cmp td { color: var(--ink-2); }
+  table.cmp td:first-child { color: var(--ink); font-weight: 560; white-space: nowrap; }
+  table.cmp tr:last-child td { border-bottom: none; }
+  table.cmp tr.me td { background: var(--accent-soft); color: var(--ink); }
+  .seo-note { margin-top: 26px; font-size: 13px; color: var(--ink-4); line-height: 1.8; }
+
+  .faq { display: grid; gap: 12px; max-width: 820px; }
+  .faq details { background: var(--pane); border: 1px solid var(--line); border-radius: 12px; padding: 18px 22px; transition: border-color .18s; }
+  .faq details[open] { border-color: var(--line-strong); }
+  .faq summary { font-size: 16px; font-weight: 600; cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: "+"; font-size: 20px; font-weight: 400; color: var(--ink-3); flex: none; line-height: 1; }
+  .faq details[open] summary::after { content: "–"; }
+  .faq details p { margin-top: 14px; color: var(--ink-2); font-size: 15px; }
+  .faq details p + p { margin-top: 12px; }
+
+  footer { border-top: 1px solid var(--line); padding: 54px 0 64px; }
+  .foot { display: flex; justify-content: space-between; align-items: flex-start; gap: 40px; flex-wrap: wrap; }
+  .foot .brand { margin-bottom: 14px; }
+  .foot p { color: var(--ink-3); font-size: 13.5px; max-width: 40ch; }
+  .foot-badges { display: flex; gap: 22px; flex-wrap: wrap; }
+  .foot-badges span { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-3); }
+  .foot-badges .icon { width: 15px; height: 15px; }
+  .foot-links { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 30px; font-size: 13.5px; color: var(--ink-3); width: 100%; border-top: 1px solid var(--line); padding-top: 26px; }
+  .foot-links a:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top">
+      <span class="glyph">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg>
+      </span>
+      ProcessX
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#safety">Safety</a>
+      <a href="#alternatives">Alternatives</a>
+      <a href="#faq">FAQ</a>
+      <a href="contact/">Contact</a>
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX">Get it</a>
+    </div>
+  </div>
+</nav>
+
+<a id="top"></a>
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow"><span class="dot"></span> macOS · Swift menu bar · zero dependencies</span>
+    <h1>Your Mac isn't slow. <span class="muted">It's just badly scheduled.</span></h1>
+    <p class="lede">Some background process — a build, an encode, sixty browser tabs, a long-running AI coding session — is taking every core it can get, and the app in front of you is fighting it for CPU. ProcessX moves the hog into the macOS <strong>background band</strong> with one click. It keeps running. You get your Mac back. <strong>Fully reversible</strong>, no admin rights.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+        Get ProcessX
+      </a>
+      <a class="btn btn-ghost" href="#how">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M9 18l6-6-6-6"/></svg>
+        How it works
+      </a>
+    </div>
+    <div class="hero-note">
+      <span><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 10 4-1.6 7-5.6 7-10V6l-7-3z"/></svg> No admin rights, no kext</span>
+      <span><svg class="icon" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A9 9 0 0121 12c-.3.8-.7 1.6-1.2 2.3M6.6 6.6A9 9 0 003 12c1.7 4 5 6 9 6a9 9 0 003.4-.7"/></svg> No telemetry, no network</span>
+      <span><svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg> Every change is undoable</span>
+    </div>
+
+    <!-- Synthetic UI mockup — representative values, not a capture of a real machine -->
+    <div class="shot">
+      <div class="window" role="img" aria-label="The ProcessX interface: CPU, GPU, memory and slowed-process tiles above a table of applications grouped per app, with Slow down and Restore actions and an expanded browser row listing individual tabs.">
+        <div class="titlebar">
+          <div class="traffic"><i></i><i></i><i></i></div>
+          <div class="title"><svg class="icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg> ProcessX</div>
+        </div>
+        <div class="app">
+          <div class="tiles">
+            <div class="tile">
+              <div class="lab"><svg class="icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg> CPU</div>
+              <div class="val">86<small>%</small></div>
+              <div class="meter"><i style="width:86%"></i></div>
+              <div class="ft">10 cores · load 9.4</div>
+            </div>
+            <div class="tile">
+              <div class="lab"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="9.5" cy="12" r="3"/><path d="M16 9.5v5M19 9.5v5"/></svg> GPU</div>
+              <div class="val">31<small>%</small></div>
+              <div class="meter"><i style="width:31%"></i></div>
+              <div class="ft">device utilization</div>
+            </div>
+            <div class="tile">
+              <div class="lab"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 7v10M12 7v10M17 7v10M5 20.5h14"/></svg> Memory</div>
+              <div class="val">27.4<small>GB</small></div>
+              <div class="meter"><i style="width:76%"></i></div>
+              <div class="ft">pressure normal · swap 0 B</div>
+            </div>
+            <div class="tile">
+              <div class="lab"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8.5 12.5 12 16l3.5-3.5"/></svg> Slowed down</div>
+              <div class="val">3</div>
+              <div class="ft">in the background band · Restore all</div>
+            </div>
+          </div>
+
+          <div class="ptable">
+            <div class="hd">
+              <div>App / process</div>
+              <div class="num">CPU</div>
+              <div class="num c-mem">Memory</div>
+              <div class="c-prio">Priority</div>
+              <div></div>
+            </div>
+            <div class="r on">
+              <div class="nm">
+                <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>
+                <b>claude</b><span>Claude Code · 4 processes</span>
+              </div>
+              <div class="num hot">412%</div>
+              <div class="num c-mem">3.1 GB</div>
+              <div class="c-prio"><span class="chip bg">background</span></div>
+              <div class="act">Restore</div>
+            </div>
+            <div class="r">
+              <div class="nm">
+                <svg class="icon" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
+                <b>Google Chrome</b><span>1 + 62 helpers</span>
+              </div>
+              <div class="num hot">187%</div>
+              <div class="num c-mem">6.4 GB</div>
+              <div class="c-prio"><span class="chip">normal</span></div>
+              <div class="act p">Slow down</div>
+            </div>
+            <div class="r">
+              <div class="nm sub">
+                <svg class="icon tw" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg>
+                <b>YouTube — 4K live stream</b><span>tab · pid 48122</span>
+              </div>
+              <div class="num">96%</div>
+              <div class="num c-mem">1.2 GB</div>
+              <div class="c-prio"><span class="chip">normal</span></div>
+              <div class="act">Slow down</div>
+            </div>
+            <div class="r">
+              <div class="nm">
+                <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>
+                <b>ffmpeg</b><span>Terminal session · auto-tamed</span>
+              </div>
+              <div class="num">98%</div>
+              <div class="num c-mem">412 MB</div>
+              <div class="c-prio"><span class="chip bg">background</span></div>
+              <div class="act">Restore</div>
+            </div>
+            <div class="r">
+              <div class="nm">
+                <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
+                <b>Music</b><span>media-safe · never touched</span>
+              </div>
+              <div class="num">8%</div>
+              <div class="num c-mem">318 MB</div>
+              <div class="c-prio"><span class="chip">protected</span></div>
+              <div class="act">—</div>
+            </div>
+            <div class="r">
+              <div class="nm">
+                <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
+                <b>Figma</b><span>frontmost · never touched</span>
+              </div>
+              <div class="num">44%</div>
+              <div class="num c-mem">2.0 GB</div>
+              <div class="c-prio"><span class="chip">foreground</span></div>
+              <div class="act">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- Problem / solution -->
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">The idea</div>
+      <h2>Don't kill it. Don't pause it. Just move it out of the way.</h2>
+      <p>macOS already has the right mechanism built in — a background resource band where a process gets CPU, disk I/O and timers only when nothing in the foreground wants them. Almost nothing exposes it. ProcessX makes it a button.</p>
+    </div>
+    <div class="split">
+      <div class="card bad">
+        <div class="tag">What you do today</div>
+        <h3><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v5M12 17.2v.3"/></svg> Force Quit, or suffer</h3>
+        <p>Activity Monitor tells you <em>which</em> process is eating your machine and then offers you exactly one lever: kill it. So you either throw away a half-finished build, or you sit and wait while your cursor stutters.</p>
+        <p><span class="mono">renice</span> looks like the answer until you try to undo it — an unprivileged user can raise a nice value but can never lower it again. One-way door.</p>
+      </div>
+      <div class="card good">
+        <div class="tag">ProcessX</div>
+        <h3><svg class="icon" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></svg> Reprioritize, reversibly</h3>
+        <p>One click drops the process into the macOS background band. It keeps running, keeps finishing your encode or your build — it just stops competing with the window you're looking at. Another click lifts it straight back out.</p>
+        <div class="formula">slow down &nbsp;→&nbsp; <b>setpriority(PRIO_DARWIN_PROCESS, pid, PRIO_DARWIN_BG)</b><br>restore &nbsp;&nbsp;&nbsp;→&nbsp; <b>… , PRIO_DARWIN_NONE)</b></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Features</div>
+      <h2>One button for the emergency. A watchdog for the rest.</h2>
+      <p>Built for the moment your Mac stops feeling instant — and for making sure that moment stops happening.</p>
+    </div>
+    <div class="grid">
+      <div class="feat">
+        <div class="ib"><svg class="icon" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2z"/></svg></div>
+        <h3>QuickFast</h3>
+        <p>The panic button. One click sweeps every background hog into the low-priority band at once — known heavy agents plus anything else burning a quarter of a core in the background. Everything it did is listed in a toast, and <strong>Restore all</strong> undoes the lot.</p>
+      </div>
+      <div class="feat">
+        <div class="ib"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div>
+        <h3>Auto-tame watchdog</h3>
+        <p>Optional and off by default. Any <em>background</em> process that stays over the threshold for three consecutive samples gets moved down automatically — the classic runaway <span class="mono">ffmpeg</span>. Bring the app to the front and it's restored instantly.</p>
+      </div>
+      <div class="feat">
+        <div class="ib"><svg class="icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 9h8M8 13h5"/></svg></div>
+        <h3>Grouped like Activity Monitor</h3>
+        <p>Chrome and its sixty helpers are one row, not sixty. And a terminal-hosted CLI session — an AI coding agent, a build, a dev server — surfaces as its own top-level row instead of hiding inside “Terminal”.</p>
+      </div>
+      <div class="feat">
+        <div class="ib"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg></div>
+        <h3>Real browser tabs</h3>
+        <p>Expand a browser and the native app asks it over Apple Events for its <strong>actual open tabs by name</strong> — Chrome, Brave, Edge, Vivaldi, Opera and Safari. Slow the one runaway tab, jump to it, leave the rest alone.</p>
+      </div>
+      <div class="feat">
+        <div class="ib"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 10 4-1.6 7-5.6 7-10V6l-7-3z"/><path d="m9.2 11.8 2 2 3.6-3.8"/></svg></div>
+        <h3>A hard no-touch list</h3>
+        <p>Never the frontmost app. Never <span class="mono">WindowServer</span>, Finder or <span class="mono">coreaudiod</span>. Never Music, Spotify, Zoom, Teams or FaceTime. Never another user's processes. Never itself. Your call is never overruled by a heuristic.</p>
+      </div>
+      <div class="feat">
+        <div class="ib"><svg class="icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg></div>
+        <h3>Zero-subprocess sampling</h3>
+        <p>The native build reads <span class="mono">proc_pidinfo</span>, <span class="mono">host_statistics64</span> and IOKit directly — <strong>no subprocesses at all</strong>, every two seconds. A monitor that costs measurable CPU is a contradiction.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Two builds -->
+<section id="builds">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Two builds</div>
+      <h2>A menu-bar app, and a local web app.</h2>
+      <p>Same policy engine, same safety rules, two very different surfaces. Pick the one that fits how you work.</p>
+    </div>
+    <div class="split">
+      <div class="card good">
+        <div class="tag">Recommended</div>
+        <h3><svg class="icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg> Native Swift menu bar</h3>
+        <p>Live CPU in the menu bar; click for the full list. Reads the kernel directly — <strong>zero subprocesses</strong>, no HTTP server, no attack surface, no dependencies. Throttle state comes from the kernel's own <span class="mono">pti_priority</span>, so it can even detect when something else lifts a throttle you set.</p>
+        <div class="codeblock" style="margin-top:20px;max-width:none">cd swift <span class="c">&amp;&amp;</span> ./bundle.sh
+cp -R build/ProcessX.app /Applications/</div>
+      </div>
+      <div class="card">
+        <div class="tag">Also included</div>
+        <h3><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01"/></svg> Zero-dependency web app</h3>
+        <p>A single Node file with <strong>no npm dependencies</strong>, serving a local dashboard on <span class="mono">127.0.0.1:4747</span>. Handy on machines you don't want to build Swift on, and the reason the security model below exists.</p>
+        <div class="codeblock" style="margin-top:20px;max-width:none">node server.js   <span class="c"># → http://localhost:4747</span>
+npm test         <span class="c"># 161 checks</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Safety -->
+<section id="safety">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Safety</div>
+      <h2>A tool that changes your system had better be honest about it.</h2>
+      <p>Everything ProcessX does is reversible by construction, scoped to processes you already own, and recorded so that Restore only ever undoes ProcessX's own work.</p>
+    </div>
+    <div class="split">
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></svg> Reversible by construction</h3>
+        <p>The background band is a symmetric, unprivileged pair of calls — that is exactly why ProcessX uses it instead of <span class="mono">renice</span>, which you cannot undo without root. Every throttle is stored with its origin (manual, QuickFast or auto) so Restore never claims credit for a band the browser set on its own inactive tab.</p>
+        <p>Records are identity-guarded by executable path, so a recycled PID is dropped rather than acted on.</p>
+      </div>
+      <div class="card">
+        <h3><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 10 4-1.6 7-5.6 7-10V6l-7-3z"/></svg> The web app is locked down</h3>
+        <p>A server on loopback is still reachable from any page in your browser. So every state-changing request is gated by an <span class="mono">Origin</span> / <span class="mono">Sec-Fetch-Site</span> / content-type check, and <em>every</em> route validates the <span class="mono">Host</span> header — which is what stops a DNS-rebinding page from reading your process list.</p>
+        <p>Rate-limited writes, capped PID lists, no raw OS stderr in responses, CSP and <span class="mono">nosniff</span> on static files. There is deliberately no login: ProcessX can only do what you could already do from a terminal.</p>
+      </div>
+    </div>
+    <div class="keys">
+      <span class="krow"><kbd>Q</kbd> QuickFast</span>
+      <span class="krow"><kbd>R</kbd> restore all</span>
+      <span class="krow"><kbd>/</kbd> filter</span>
+      <span class="krow">Auto-tame <strong>off</strong> by default</span>
+      <span class="krow">Throttles survive a restart</span>
+    </div>
+  </div>
+</section>
+
+<!-- Numbers -->
+<section id="proof">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Verification</div>
+      <h2>Claims that a test suite actually checks.</h2>
+      <p>Both builds ship their own harness, and both of them throttle a <em>sacrificial process the harness spawned itself</em> to prove the kernel really moved it — and moved it back.</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="n">161</div><div class="l">checks in the web harness</div><div class="s">security, contract, fuzz, a11y, e2e</div></div>
+      <div class="stat"><div class="n">30</div><div class="l">checks in the Swift self-test</div><div class="s">real syscalls, real child process</div></div>
+      <div class="stat"><div class="n">0<small> deps</small></div><div class="l">npm packages</div><div class="s">and zero Swift packages</div></div>
+      <div class="stat"><div class="n">0<small>/sample</small></div><div class="l">subprocesses, native build</div><div class="s">down from ~8 every 2 s</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- Alternatives / comparison -->
+<section id="alternatives">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Comparison</div>
+      <h2>How ProcessX compares to other Mac process tools.</h2>
+      <p>If you're weighing Activity Monitor, App Tamer, iStat Menus, Stats or just living in <span class="mono">htop</span> — here's an honest summary, including where the others are genuinely better.</p>
+    </div>
+    <div class="tablewrap">
+      <table class="cmp">
+        <thead>
+          <tr><th>Tool</th><th>Price</th><th>Approach</th><th>How ProcessX differs</th></tr>
+        </thead>
+        <tbody>
+          <tr class="me">
+            <td><strong>ProcessX</strong></td><td>Free, open source</td>
+            <td>Moves processes into the macOS background resource band, reversibly</td>
+            <td>The process is never suspended and never killed; one-click QuickFast for the whole system; an opt-in watchdog; hard no-touch list for foreground, system and media apps</td>
+          </tr>
+          <tr>
+            <td>Activity Monitor</td><td>Built in</td><td>The definitive read-only view of what your Mac is doing</td>
+            <td>Excellent at diagnosis, and it has energy, disk and network tabs ProcessX doesn't. Its only intervention is Force Quit — ProcessX adds the reversible middle ground</td>
+          </tr>
+          <tr>
+            <td>App Tamer</td><td>~$15 one-time</td><td>Stops and resumes CPU-hungry apps to hold them under a set percentage</td>
+            <td>App Tamer is mature, polished and gives you a precise CPU cap per app. ProcessX is free and open source and never suspends a process — it hands the decision to the kernel scheduler, so throttled work still runs flat out whenever the foreground is idle</td>
+          </tr>
+          <tr>
+            <td>iStat Menus</td><td>Paid</td><td>The best-in-class menu-bar system monitor</td>
+            <td>iStat Menus covers far more sensors — temperature, fans, network, battery, weather. It doesn't reprioritize anything; ProcessX is a smaller monitor that can act</td>
+          </tr>
+          <tr>
+            <td>Stats</td><td>Free (open source)</td><td>Popular open-source menu-bar monitor</td>
+            <td>Stats is a superb, mature monitor with far more modules. ProcessX overlaps only on the CPU glance and adds process-level reprioritization</td>
+          </tr>
+          <tr>
+            <td>htop · top · btop</td><td>Free</td><td>Terminal process viewers with a renice key</td>
+            <td>ProcessX keeps their per-process granularity, but uses the reversible background band instead of <span class="mono">renice</span> — and groups helper processes per app instead of listing all sixty</td>
+          </tr>
+          <tr>
+            <td><span class="mono">taskpolicy</span> / <span class="mono">renice</span></td><td>Built in</td><td>Command-line priority control</td>
+            <td>ProcessX is a GUI over exactly this mechanism, plus the parts a one-liner can't give you: finding the hog, refusing to touch what matters, remembering what it did, and undoing all of it at once</td>
+          </tr>
+          <tr>
+            <td>Turbo Boost Switcher · thermal tools</td><td>Free / paid</td><td>Reduce total CPU output to cut heat and fan noise</td>
+            <td>Those slow down the <em>whole machine</em>. ProcessX slows down one process so the rest of the machine gets faster</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="seo-note">People find ProcessX searching for: mac process monitor · why is my Mac so slow · how to fix a slow MacBook · limit CPU usage macOS · throttle a process on Mac · stop Chrome using so much CPU · macOS background band · <span class="mono">taskpolicy</span> · <span class="mono">renice</span> on Mac · deprioritize a process macOS · Activity Monitor alternative · free App Tamer alternative · iStat Menus alternative · mac menu bar CPU monitor · open source macOS process manager.</p>
+  </div>
+</section>
+
+<!-- How it was built -->
+<section id="built">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">How it was built</div>
+      <h2>Written, attacked and rewritten by an AI orchestration pipeline.</h2>
+      <p>ProcessX was built end-to-end by a multi-agent framework: implementation, then an adversarial QA loop that ran <strong>fourteen find-and-fix iterations</strong> against its own automated harness, then a native rewrite that removed the whole subprocess layer.</p>
+    </div>
+    <div class="pipe">
+      <div class="step">
+        <div class="num">Phase 1</div>
+        <h3>Build the harness first</h3>
+        <p>Before any hardening, a zero-dependency harness was written that spins up its own server on a private port with an isolated state file, so tests could never touch a real machine's throttles. Everything after this is measured, not asserted.</p>
+        <div class="agents"><svg class="icon" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></svg> 161 checks, eight suites</div>
+      </div>
+      <div class="step">
+        <div class="num">Phase 2</div>
+        <h3>Attack it, then fix it</h3>
+        <p>Iteration 1 found a real hole: no <span class="mono">Host</span> validation, so a DNS-rebinding page could read the process list and issue writes. Iterations 5–9 found 28 WCAG contrast failures across both themes. Iterations 10–12 fixed responsive overflow and drove a real throttle round-trip through the DOM.</p>
+        <div class="agents"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 10 4-1.6 7-5.6 7-10V6l-7-3z"/></svg> 14 iterations, all green</div>
+      </div>
+      <div class="step">
+        <div class="num">Phase 3</div>
+        <h3>Delete the subprocesses</h3>
+        <p>The Node build forked around eight processes every two seconds to answer questions the kernel will answer directly. The Swift rewrite replaced all of it with <span class="mono">proc_pidinfo</span>, <span class="mono">host_statistics64</span>, IOKit and <span class="mono">NSWorkspace</span> — and caught a mach-timebase bug that under-reported CPU by 41× on Apple Silicon.</p>
+        <div class="agents"><svg class="icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg> 8 subprocesses → 0</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">FAQ</div>
+      <h2>Questions people actually ask.</h2>
+      <p>Short, direct answers — for readers and for the answer engines that quote them.</p>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary>How do I stop an app from hogging the CPU on a Mac?</summary>
+        <p>macOS has a <strong>background resource band</strong>: a scheduling tier where a process gets CPU, disk I/O and timers only when nothing in the foreground wants them. ProcessX moves a chosen process — or a whole app group — into that band with one click, and lifts it back out with another.</p>
+        <p>The process keeps running and keeps making progress. It simply stops competing with whatever you're actually using. No admin rights are needed, because you can only affect processes you already own.</p>
+      </details>
+      <details>
+        <summary>Why does my Mac get slow when Chrome or an AI assistant is running?</summary>
+        <p>Because macOS schedules, by default, as though every process deserves an equal share. A build, an encode, sixty tabs or a long-running AI coding session will take every core it can get, and the window in front of you fights for the same cores. Quitting is destructive; pausing stops the work. Changing the priority is the option nobody exposes — so ProcessX exposes it.</p>
+      </details>
+      <details>
+        <summary>Is ProcessX a free alternative to App Tamer?</summary>
+        <p>Yes, though the mechanism differs. App Tamer is a mature paid utility that holds an app under a CPU cap by repeatedly stopping and resuming it. ProcessX is free and open source and never suspends anything: it changes the scheduling band and lets the kernel decide, so a throttled process still runs at full speed whenever your foreground is idle. If you need a hard percentage cap, App Tamer does that and ProcessX doesn't.</p>
+      </details>
+      <details>
+        <summary>Why not just use <span class="mono">renice</span>?</summary>
+        <p>Because it's a one-way door. An unprivileged user can raise a nice value but can never lower it back without root — so you could slow a process down and then be unable to undo it. The background band (<span class="mono">taskpolicy -b</span>, or <span class="mono">setpriority</span> with <span class="mono">PRIO_DARWIN_BG</span>) is symmetric for the same user, and it throttles disk I/O and timer coalescing as well as CPU. That reversibility is the entire reason ProcessX is built on it.</p>
+      </details>
+      <details>
+        <summary>Does ProcessX need admin rights, an installer or a kernel extension?</summary>
+        <p>None of the three. No password prompt, no daemon, no kext. It only changes the priority of processes owned by the user running it — exactly what that user could already do from a terminal.</p>
+      </details>
+      <details>
+        <summary>Can I slow down a single browser tab?</summary>
+        <p>Yes. Expanding a browser row lists its renderer processes, and in the native app scriptable browsers — Chrome and its Chromium siblings, plus Safari — are asked over Apple Events for their <strong>real open tabs by name</strong>, with a Jump button to switch to one. macOS will ask your permission the first time. Non-scriptable browsers such as Firefox still expand to renderer PIDs.</p>
+      </details>
+      <details>
+        <summary>What will ProcessX never touch?</summary>
+        <p>The frontmost application, including a command-line tool running in the frontmost terminal; protected system processes such as <span class="mono">WindowServer</span>, Finder and <span class="mono">coreaudiod</span>; media and call apps such as Music, Spotify, Zoom, Teams and FaceTime; processes owned by other users; and itself. Auto-tame is off by default, and everything QuickFast does is listed and undoable in one click.</p>
+      </details>
+      <details>
+        <summary>Does ProcessX send my data anywhere?</summary>
+        <p>No. No telemetry, no account, no network calls. The native app reads process information straight from the kernel. The optional local web app binds to <span class="mono">127.0.0.1</span> only and validates the <span class="mono">Host</span>, <span class="mono">Origin</span> and <span class="mono">Sec-Fetch-Site</span> headers on every route, so no web page — not even one pointing its own domain at loopback — can read your process list or throttle anything.</p>
+      </details>
+      <details>
+        <summary>What are the requirements?</summary>
+        <p>The native menu-bar app targets macOS 26 and is built with a Swift 6.2 toolchain. The local web app needs only Node 18 or later and runs on any recent macOS. Both are universal across Apple Silicon and Intel; the CPU accounting is explicitly mach-timebase corrected, so Apple Silicon reports true percentages.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- Download -->
+<section id="get">
+  <div class="wrap cta-band">
+    <h2>Get your Mac back.</h2>
+    <p>Free and open source. No installer, no admin rights, no telemetry — and every change it makes is one click away from being undone.</p>
+    <div class="cta-actions">
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+        Get ProcessX on GitHub
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/avantigroupai/ProcessX/issues">Report an issue</a>
+    </div>
+
+    <div class="install">
+      <h3>Native menu-bar app</h3>
+      <p>Requires macOS 26 and a Swift 6.2 toolchain. <span class="mono">bundle.sh</span> produces a signed-for-local-use app bundle with its icon.</p>
+      <div class="codeblock" style="margin-top:16px">git clone <span class="p">https://github.com/avantigroupai/ProcessX.git</span>
+cd ProcessX/swift <span class="c">&amp;&amp;</span> ./bundle.sh
+cp -R build/ProcessX.app /Applications/
+swift run -c release ProcessX --selftest   <span class="c"># 30 real-syscall checks</span></div>
+      <h3 style="margin-top:32px">Local web app</h3>
+      <p>Node 18 or later. No npm install step — there are no dependencies to install.</p>
+      <div class="codeblock" style="margin-top:16px">cd ProcessX
+node server.js   <span class="c"># → http://localhost:4747</span>
+npm test         <span class="c"># 161-check QA harness</span></div>
+      <p style="margin-top:20px">Expanding a browser row to see its real tab names asks macOS for Automation permission the first time. Decline it and the row falls back to renderer PIDs — nothing else changes.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div>
+        <a class="brand" href="#top">
+          <span class="glyph"><svg class="icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg></span>
+          ProcessX
+        </a>
+        <p>The reversible priority switch macOS always had and never showed you.</p>
+      </div>
+      <div class="foot-badges">
+        <span><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 10 4-1.6 7-5.6 7-10V6l-7-3z"/></svg> No admin rights</span>
+        <span><svg class="icon" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.1A9 9 0 0121 12M6.6 6.6A9 9 0 003 12c1.7 4 5 6 9 6"/></svg> No telemetry in the app</span>
+        <span><svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg> Everything is undoable</span>
+      </div>
+      <div class="foot-links">
+        <a href="https://github.com/avantigroupai/ProcessX">GitHub</a>
+        <a href="#features">Features</a>
+        <a href="#safety">Safety</a>
+        <a href="#alternatives">Alternatives</a>
+        <a href="#faq">FAQ</a>
+        <a href="#built">How it's built</a>
+        <a href="contact/">Contact</a>
+        <a href="llms.txt">llms.txt</a>
+        <span style="margin-left:auto;color:var(--ink-4)">Built with a multi-agent AI orchestration pipeline · <a href="https://avantigroup.ai/">avantigroup.ai</a></span>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

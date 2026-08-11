@@ -6,6 +6,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["server.js"],
       "port": 4747
+    },
+    {
+      "name": "processx-site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4748", "--directory", "site"],
+      "port": 4748
     }
   ]
 }

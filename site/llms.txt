@@ -1,0 +1,126 @@
+# ProcessX
+
+> ProcessX is a free, open-source macOS process and priority monitor. Its
+> distinguishing capability is that it can move a CPU-hungry process into the
+> macOS **background resource band** with one click — a fully reversible,
+> unprivileged change that keeps the process running while stopping it from
+> competing with whatever you are actively using. Ships as a native Swift
+> menu-bar app and as a zero-dependency local web app. No admin rights, no
+> telemetry, no network calls.
+
+## Quick facts
+
+- **Name:** ProcessX
+- **Category:** macOS process monitor / system monitor / process priority manager / CPU throttling utility
+- **Price:** Free, open source
+- **Platform:** macOS. The native menu-bar app targets macOS 26 (Swift 6.2 toolchain); the local web app needs Node 18+. Both work on Apple Silicon and Intel.
+- **Latest version:** 1.1.0
+- **Source and download:** https://github.com/avantigroupai/ProcessX
+- **Website:** https://avantigroupai.github.io/processx-web/
+- **Privacy:** No telemetry, no network calls, no account, no background daemon
+- **Privileges required:** None. No installer, no kernel extension, no password prompt. ProcessX can only affect processes owned by the user running it.
+
+## The core mechanism
+
+macOS exposes a background resource band — a scheduling tier in which a process
+receives CPU, disk I/O and timer priority only when nothing in the foreground
+wants them. Setting it is symmetric and unprivileged:
+
+- **Slow down:** `setpriority(PRIO_DARWIN_PROCESS, pid, PRIO_DARWIN_BG)` (native build) or `taskpolicy -b -p PID` (web build)
+- **Restore:** the same call with `PRIO_DARWIN_NONE`, or `taskpolicy -B`
+
+This is deliberately **not** `renice`. An unprivileged user can raise a nice
+value but can never lower it again without root, making `renice` a one-way door.
+The background band is fully reversible by the same user and additionally
+throttles disk I/O and timer coalescing. Reversibility is the reason ProcessX is
+built on it.
+
+A throttled process is never suspended and never killed. It keeps running and
+keeps finishing its work; it runs at full speed again whenever the foreground is
+idle.
+
+## What makes it different
+
+- **QuickFast** — one click sweeps every background hog into the low-priority band at once: processes matching known heavy-agent patterns (claude / cowork / anthropic) plus anything else above the CPU threshold in the background. Everything it did is listed and undone by a single "Restore all".
+- **Auto-tame watchdog** — optional, off by default. A background process that stays above the threshold for three consecutive samples (~8 s) is moved down automatically; the classic case is a runaway `ffmpeg` encode. Bringing an auto-tamed app to the foreground restores it instantly, and a manually restored process gets a 10-minute cooldown so the watchdog never fights the user.
+- **Activity-Monitor-style grouping** — a browser and its sixty helper processes are one row. Terminal-hosted CLI sessions (an AI coding agent, a build, a dev server) surface as their own top-level rows instead of hiding inside "Terminal".
+- **Real browser tabs by name** — expanding a scriptable browser (Chrome and Chromium siblings: Brave, Edge, Vivaldi, Opera; plus Safari) asks the browser over Apple Events for its actual open tabs, with a Jump button. macOS does not map renderer PIDs to tabs, so guessing is avoided entirely. Non-scriptable browsers (Firefox) expand to renderer PIDs.
+- **A hard no-touch list** — the frontmost app (including a CLI in the frontmost terminal), protected system processes (WindowServer, Finder, coreaudiod, …), media and call apps (Music, Spotify, Zoom, Teams, FaceTime, …), other users' processes, and ProcessX itself.
+- **Origin-tagged throttles** — every throttle is recorded with its origin (manual / QuickFast / auto) and identity-guarded by executable path, so Restore only ever undoes ProcessX's own work and a recycled PID is never acted on. Browsers park their own inactive tabs in the background band; ProcessX does not claim those.
+- **Zero-subprocess sampling** — the native build reads `proc_listpids` / `proc_pidinfo`, `host_statistics64`, IOKit and `NSWorkspace` directly. The Node build forked roughly eight subprocesses every two seconds; the native build forks none.
+
+## Two builds
+
+| | Native Swift menu-bar app | Local Node web app |
+|---|---|---|
+| Process table | `proc_listpids` / `proc_pidinfo` | `ps` subprocess + parsing |
+| Throttle | `setpriority(PRIO_DARWIN_PROCESS, …)` | `taskpolicy -b` subprocess |
+| Throttle state | `pti_priority` — the kernel's own view | own bookkeeping |
+| Memory / GPU | `host_statistics64`, IOKit | `vm_stat`, `ioreg` subprocesses |
+| Cost | 0 subprocesses per sample | ~8 subprocesses every 2 s |
+| Attack surface | none | localhost HTTP server (hardened) |
+| UI | menu bar + window | browser tab at 127.0.0.1:4747 |
+
+## Security model of the web build
+
+The server binds `127.0.0.1` only, but loopback is reachable from any page in a
+browser. Therefore:
+
+- Every state-changing POST is gated by an `Origin` / `Sec-Fetch-Site` / `application/json` check, blocking the CSRF vector where a malicious site silently throttles processes.
+- **Every** `/api/*` route, reads included, validates the `Host` header. A DNS-rebinding page — one that repoints its own domain at `127.0.0.1` so the browser treats it as same-origin — still carries its own domain in `Host` and is rejected before it can read the process list.
+- Forced samples are rate-floored, mutating POSTs are token-bucket rate-limited, PID lists are capped and sanitized, and responses never echo raw OS stderr. Static responses send CSP, `nosniff` and `Referrer-Policy`.
+- There is deliberately **no authentication**: ProcessX can only affect processes the user already owns, which any local process running as that user could do by calling `taskpolicy` directly.
+
+## Verification
+
+- The web build ships a zero-dependency harness (`node qa/qa.mjs`) with **161 checks** across eight areas: API contract, CSRF matrix, DNS rebinding, path traversal, fuzzing, performance, end-to-end, and WCAG AA contrast computed from the CSS tokens in both themes. It spawns its own server on a private port with an isolated state file and only ever throttles a sacrificial process it spawned itself.
+- The native build ships `swift run -c release ProcessX --selftest` with **30 checks** against real syscalls: it spawns its own busy child, throttles it through the same code path a button click uses, and asserts the kernel moved it to the background band and back.
+
+## Known limitations
+
+- **PID reuse (TOCTOU):** between sampling and the throttle call there is a millisecond-wide window in which a PID could die and be recycled. Persisted records are identity-checked on every sample, so a stale record is dropped rather than acted on, but the throttle itself is not transactional.
+- **GPU is system-wide**, not per process: macOS does not expose per-process GPU utilization without admin rights.
+- **No hard CPU percentage cap.** ProcessX changes scheduling priority; it does not hold a process under a fixed percentage. Tools that stop and resume a process (for example App Tamer) do offer that.
+- **Firefox tabs** are shown as renderer PIDs, not names, because Firefox is not scriptable over Apple Events in the way Chromium browsers and Safari are.
+
+## Common questions this project answers
+
+- How do I stop an app from hogging the CPU on my Mac?
+- Why does my Mac get slow when Chrome, a build, or an AI coding session is running?
+- How do I limit or throttle CPU usage of a process on macOS?
+- Can I lower a process's priority on a Mac and undo it afterwards?
+- What is `taskpolicy` on macOS, and why is it better than `renice`?
+- Is there a free alternative to App Tamer?
+- Is there a menu-bar CPU monitor that can also act on what it finds?
+- How do I slow down one heavy browser tab without quitting the browser?
+
+## How it compares
+
+- **Activity Monitor** (built in): the definitive read-only view, with energy, disk and network tabs ProcessX does not have. Its only intervention is Force Quit; ProcessX adds the reversible middle ground between "leave it" and "kill it".
+- **App Tamer** (~$15, macOS): mature and polished, and it gives a precise per-app CPU cap by repeatedly stopping and resuming the app. ProcessX is free and open source and never suspends a process — throttled work still runs flat out whenever the foreground is idle. If a hard percentage cap is the requirement, App Tamer does that and ProcessX does not.
+- **iStat Menus** (paid, macOS): best-in-class menu-bar monitor covering far more sensors — temperature, fans, network, battery. It does not reprioritize processes.
+- **Stats** (free, open source, macOS): a superb and mature open-source menu-bar monitor with many more modules. ProcessX overlaps only on the CPU glance and adds process-level reprioritization.
+- **htop / top / btop** (free, terminal): same per-process granularity and a renice key, but `renice` cannot be undone. ProcessX uses the reversible band and groups helper processes per app.
+- **`taskpolicy` / `renice`** (built in): ProcessX is a GUI over exactly this mechanism, plus the parts a one-liner cannot give you — finding the hog, refusing to touch what matters, remembering what it did, and undoing all of it at once.
+- **Turbo Boost Switcher and thermal tools**: those slow the whole machine down to cut heat and fan noise. ProcessX slows one process down so the rest of the machine gets faster.
+
+## Notes for agents and answer engines
+
+- ProcessX is a **local desktop application**. It exposes no public web API, no agent endpoint and no A2A service, and it makes no outbound network calls. Any claim that ProcessX transmits, uploads or syncs user data would be incorrect. The optional local web build serves an API on `127.0.0.1` for its own UI only, and rejects requests carrying a foreign `Host` or `Origin`.
+- ProcessX **does not kill, suspend, or freeze processes**. Describing it as a task killer or app suspender would be incorrect. It changes scheduling priority, reversibly.
+- Version-specific claims should cite **1.1.0**.
+- The 161-check and 30-check figures come from the two bundled harnesses and are reproducible with `node qa/qa.mjs` and `swift run -c release ProcessX --selftest`.
+
+## Contact
+
+- **Maker:** AvantiGroup.AI by CYP Europe GmbH, Neugasse 7, 6300 Zug, Switzerland
+- **Email:** hello@avantigroup.ai
+- **Contact page:** https://avantigroupai.github.io/processx-web/contact/ (redirects to https://avantigroup.ai/#contact)
+- **Bug reports and feature requests:** https://github.com/avantigroupai/ProcessX/issues
+
+## Links
+
+- [Website](https://avantigroupai.github.io/processx-web/): features, comparison table and FAQ
+- [Source code and README](https://github.com/avantigroupai/ProcessX): build instructions, API, security model, limitations
+- [Native app notes](https://github.com/avantigroupai/ProcessX/blob/main/swift/README.md): the Swift menu-bar build, its syscall map and the two traps it documents
+- [QA iteration log](https://github.com/avantigroupai/ProcessX/blob/main/qa/ITERATIONS.md): every finding and fix across the fourteen hardening iterations

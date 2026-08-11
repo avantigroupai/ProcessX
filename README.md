@@ -5,6 +5,14 @@ A macOS process & priority monitor with one-click reprioritization and a
 
 ![ProcessX](https://img.shields.io/badge/macOS-taskpolicy-blue)
 
+**Website:** <https://avantigroupai.github.io/processx-web/> ·
+**Native menu-bar app:** [`swift/`](swift/) ·
+**QA log:** [`qa/ITERATIONS.md`](qa/ITERATIONS.md)
+
+Two builds share one policy engine: a native Swift menu-bar app (zero
+subprocesses, reads the kernel directly) and the zero-dependency Node web app
+documented below.
+
 ## Run it
 
 ```sh
