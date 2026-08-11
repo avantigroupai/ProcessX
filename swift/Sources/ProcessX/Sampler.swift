@@ -10,6 +10,10 @@ struct ProcSample {
     var rss: UInt64
     var priority: Int32   // pti_priority — kernel truth: <= bgBand means throttled
     var cpuPct: Double    // % of ONE core over the last interval
+    /// SIGSTOPped right now — by us (a cap's stopped phase) or by anything else.
+    /// Read before capping: a process someone else suspended must not be adopted,
+    /// because releasing the cap would resume something we never stopped.
+    var isStopped: Bool = false
     var groupKey: String = ""
 }
 
@@ -19,12 +23,15 @@ final class Sampler {
     /// foreground task reports ~26–31. Measured directly against taskpolicy -b/-B.
     static let bgBand: Int32 = 4
 
+    /// SSTOP from <sys/proc.h> — the macro doesn't import into Swift.
+    static let stoppedStatus: UInt32 = 4
+
     /// pti_total_user/pti_total_system are in **mach absolute time units, not
     /// nanoseconds**. On Apple Silicon the timebase is 125/3 (24 MHz), so treating
     /// ticks as ns under-reports CPU by ~41x — enough that auto-tame would never
     /// fire. On Intel numer == denom == 1, which is exactly why this bug hides
     /// there and must be converted explicitly rather than assumed.
-    private static let ticksToNanos: Double = {
+    static let ticksToNanos: Double = {
         var tb = mach_timebase_info_data_t()
         mach_timebase_info(&tb)
         return Double(tb.numer) / Double(tb.denom)
@@ -89,7 +96,8 @@ final class Sampler {
                 path: path.isEmpty ? comm : path,
                 rss: info.ptinfo.pti_resident_size,
                 priority: info.ptinfo.pti_priority,
-                cpuPct: pct
+                cpuPct: pct,
+                isStopped: info.pbsd.pbi_status == Self.stoppedStatus
             ))
         }
 

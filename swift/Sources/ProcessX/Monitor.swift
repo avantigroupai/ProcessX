@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Darwin
 import Foundation
@@ -15,6 +16,8 @@ final class Monitor: ObservableObject {
     @Published private(set) var gpu: Int?
     @Published private(set) var memory = MemoryStats()
     @Published private(set) var throttled: [ThrottleRecord] = []
+    /// Groups currently held under a hard CPU cap (suspend/resume duty cycle).
+    @Published private(set) var caps: [CapRecord] = []
     @Published var search: String = ""
     @Published var showSystem = false
     @Published var lastMessage: String?
@@ -61,10 +64,13 @@ final class Monitor: ObservableObject {
     @AppStorage("autoTame") var autoTame = false
     @AppStorage("cpuThreshold") var cpuThreshold: Double = 25
     @AppStorage("theme") var themeName: String = AppTheme.liquidGlass.rawValue
+    /// Whether the "a cap suspends the app" explainer has been shown and accepted.
+    @AppStorage("capAcknowledged") var capAcknowledged = false
     var theme: AppTheme { AppTheme(rawValue: themeName) ?? .liquidGlass }
 
     private let sampler = Sampler()
     private let store = ThrottleStore()
+    private let capper = Capper()
     private let myUID = getuid()
     private let selfPID = getpid()
     private var timer: Timer?
@@ -77,6 +83,16 @@ final class Monitor: ObservableObject {
     private var tickCoalescePending = false
 
     init() {
+        // Before anything else can be suspended: let go of anything a previous run
+        // died holding, and arm the handlers that resume on the way out.
+        Capper.releaseOrphans()
+        CapEmergency.install()
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.capper.clearAllSync()
+        }
+
         tick()
         timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -99,6 +115,7 @@ final class Monitor: ObservableObject {
         store.reconcile(live: m.byPID)
         model = m
         throttled = store.all.sorted { $0.at > $1.at }
+        reconcileCaps()
         totalCPU = min(100, procs.reduce(0) { $0 + $1.cpuPct } / Double(SystemStats.coreCount))
         gpu = SystemStats.gpuUtilization()
         memory = SystemStats.memory()
@@ -186,6 +203,87 @@ final class Monitor: ObservableObject {
 
     func restoreGroup(_ g: ProcGroup) {
         restore(pids: g.procs.map(\.pid).filter { store.record($0) != nil })
+    }
+
+    // MARK: - hard caps
+
+    /// The percentages offered in the UI, in % of one core — the same unit as the
+    /// CPU column, so "cap at 25%" and "25.0%" in the table mean the same thing.
+    static let capChoices: [Double] = [5, 10, 25, 50]
+
+    func cap(forKey key: String) -> CapRecord? { caps.first { $0.key == key } }
+    func isCapped(_ key: String) -> Bool { cap(forKey: key) != nil }
+
+    /// Why this group can't be capped, or nil if it can. Drives both the menu's
+    /// disabled state and the refusal message, so they can't disagree.
+    func capRefusal(_ g: ProcGroup) -> String? {
+        if model.isFront(g.key) { return "it's the app you're using" }
+        if g.isCritical || !g.actionable { return "it's a protected system process" }
+        if capTargets(g).isEmpty {
+            let first = g.procs.compactMap {
+                Policy.capIneligibleReason($0, myUID: myUID, selfPID: selfPID)
+            }.first
+            return first ?? "nothing in it can be suspended"
+        }
+        return nil
+    }
+
+    /// `ours` = pids this cap already holds, which are legitimately suspended right
+    /// now because we suspended them.
+    private func capTargets(_ g: ProcGroup, ours: Set<pid_t> = []) -> [CapTarget] {
+        g.procs
+            .filter {
+                Policy.capIneligibleReason($0, myUID: myUID, selfPID: selfPID,
+                                           alreadyCapped: ours.contains($0.pid)) == nil
+            }
+            .map { CapTarget(pid: $0.pid, path: $0.path) }
+    }
+
+    func setCap(_ g: ProcGroup, percent: Double) {
+        if let why = capRefusal(g) {
+            lastMessage = "Can't cap \(g.name) — \(why)"
+            return
+        }
+        let targets = capTargets(g)
+        capper.set(key: g.key, name: g.name, percent: percent, targets: targets)
+        caps = capper.snapshot()
+        lastMessage = "\(g.name) capped at \(Int(percent))% of a core "
+            + "(\(targets.count) process\(targets.count == 1 ? "" : "es"), suspended and resumed in turn)"
+    }
+
+    func clearCap(_ g: ProcGroup) { clearCap(key: g.key, name: g.name) }
+
+    func clearCap(key: String, name: String) {
+        capper.clear(key)
+        caps = capper.snapshot()
+        lastMessage = "Cap removed from \(name) — running at full speed again"
+    }
+
+    func clearAllCaps() {
+        capper.clearAll()
+        caps = capper.snapshot()
+        lastMessage = "All caps removed"
+    }
+
+    /// Per-tick cap maintenance: re-resolve each capped group's pids (helpers come
+    /// and go), and release a cap the moment its app comes to the front — the same
+    /// focus rescue auto-tame does, and far more important here, because a
+    /// suspended app you just clicked on is a beachball.
+    private func reconcileCaps() {
+        guard !caps.isEmpty else { return }
+
+        for record in caps where model.isFront(record.key) {
+            capper.clear(record.key)
+            lastMessage = "\(record.name) came to the front — cap released"
+        }
+
+        var fresh: [String: [CapTarget]] = [:]
+        for record in caps where !model.isFront(record.key) {
+            guard let g = model.group(for: record.key) else { continue }
+            fresh[record.key] = capTargets(g, ours: Set(record.targets.map(\.pid)))
+        }
+        capper.refresh(fresh)
+        caps = capper.snapshot()
     }
 
     // MARK: - QuickFast

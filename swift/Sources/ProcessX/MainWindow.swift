@@ -69,6 +69,16 @@ struct MainWindow: View {
 
             themeMenu
 
+            if !monitor.caps.isEmpty {
+                Button { monitor.clearAllCaps() } label: {
+                    Label("Release caps (\(monitor.caps.count))", systemImage: "speedometer")
+                        .font(.system(size: UI.body, weight: .medium))
+                        .padding(.horizontal, 8).padding(.vertical, 6)
+                }
+                .buttonStyle(.glass)
+                .help("Remove every hard CPU cap — capped apps stop being suspended and run at full speed.")
+            }
+
             if !monitor.throttled.isEmpty {
                 Button { monitor.restoreAll() } label: {
                     Label("Restore all (\(monitor.throttled.count))", systemImage: "arrow.uturn.backward")
@@ -142,10 +152,20 @@ struct MainWindow: View {
                       history: [])
             CountCard(theme: theme, icon: "tortoise", label: "Slowed down",
                       count: monitor.throttled.count,
-                      foot: monitor.throttled.isEmpty
-                        ? "nothing throttled by ProcessX"
-                        : Array(Set(monitor.throttled.map(\.name))).sorted().prefix(2).joined(separator: ", "))
+                      foot: tamedFoot)
         }
+    }
+
+    /// One line for two mechanisms: caps are rarer and more consequential, so they
+    /// take the line whenever any exist.
+    private var tamedFoot: String {
+        if let c = monitor.caps.first {
+            let extra = monitor.caps.count > 1 ? " +\(monitor.caps.count - 1) more" : ""
+            return "capped: \(c.name) at \(Int(c.percent))%\(extra)"
+        }
+        return monitor.throttled.isEmpty
+            ? "nothing throttled by ProcessX"
+            : Array(Set(monitor.throttled.map(\.name))).sorted().prefix(2).joined(separator: ", ")
     }
 
     private var memNumber: String {
@@ -192,7 +212,7 @@ struct MainWindow: View {
                 sortHeader("CPU", .cpu, width: 180, trailing: true)
                 sortHeader("MEMORY", .memory, width: 100, trailing: true)
                 sortHeader("PRIORITY", .priority, width: 110, trailing: false, leadingPad: 22)
-                Text("").frame(width: 116)
+                Text("").frame(width: 150)
             }
             .padding(.horizontal, 22).padding(.vertical, 12)
 
@@ -399,8 +419,11 @@ struct BigGroupRow: View {
     @State private var hovering = false
     @State private var confirmBulk = false
     @State private var showInfo = false
+    /// Set when a cap was chosen but the one-time explainer hasn't been accepted.
+    @State private var pendingCap: Double?
 
     private var ourThrottled: Int { group.procs.filter { monitor.isThrottledByUs($0.pid) }.count }
+    private var capRecord: CapRecord? { monitor.cap(forKey: group.key) }
 
     private var info: ProcInfo {
         ProcessCatalog.describe(name: group.name, path: group.procs.first?.path ?? "", kind: group.kind)
@@ -408,6 +431,9 @@ struct BigGroupRow: View {
     private var rowTooltip: String {
         "\(info.title) — \(info.category)\n\(info.detail)"
         + (group.count > 1 ? "\n\(group.count) processes" : "")
+        + (capRecord.map {
+            String(format: "\nCapped at %d%% of a core — currently %.1f%%", Int($0.percent), $0.achieved)
+        } ?? "")
     }
 
     var body: some View {
@@ -430,6 +456,9 @@ struct BigGroupRow: View {
                     if ourThrottled > 0 {
                         Pill(text: ourThrottled == group.count ? "slowed" : "\(ourThrottled) slowed", tone: .accent, accent: accent)
                     }
+                    if let c = capRecord {
+                        Pill(text: "capped \(Int(c.percent))%", tone: .warn, accent: accent)
+                    }
                     Button { showInfo = true } label: {
                         glyph("info.circle", UI.caption).foregroundStyle(.secondary)
                     }
@@ -446,7 +475,7 @@ struct BigGroupRow: View {
                 Text(fmtBytes(group.mem)).font(.system(size: UI.num)).monospacedDigit()
                     .frame(width: 100, alignment: .trailing)
                 priorityCell.frame(width: 110, alignment: .leading).padding(.leading, 22)
-                actions.frame(width: 116, alignment: .trailing)
+                actions.frame(width: 150, alignment: .trailing)
             }
             .padding(.horizontal, 22).frame(height: UI.rowHeight)
             .background(hovering ? Color.primary.opacity(0.06) : .clear)
@@ -475,6 +504,33 @@ struct BigGroupRow: View {
         } message: {
             Text("This moves every process in \(group.name) into the background band. Reversible with Restore.")
         }
+        // Shown once, before the first cap of the session's lifetime: a cap is a
+        // different bargain from Slow down and the user has to be told which one
+        // they're taking.
+        .confirmationDialog("Cap \(group.name) at \(Int(pendingCap ?? 0))% of a core?",
+                            isPresented: Binding(get: { pendingCap != nil },
+                                                 set: { if !$0 { pendingCap = nil } }),
+                            titleVisibility: .visible) {
+            Button("Cap it") {
+                if let p = pendingCap {
+                    monitor.capAcknowledged = true
+                    monitor.setCap(group, percent: p)
+                }
+                pendingCap = nil
+            }
+            Button("Cancel", role: .cancel) { pendingCap = nil }
+        } message: {
+            Text("""
+                 A cap works differently from Slow down. Instead of changing scheduling \
+                 priority, ProcessX repeatedly suspends and resumes the app to hold it \
+                 under the percentage.
+
+                 While suspended it cannot respond: network connections can time out, \
+                 timers drift, and the app may beachball if it's on screen. Media and \
+                 call apps, system processes and the app you're using are never capped, \
+                 and bringing a capped app to the front releases the cap instantly.
+                 """)
+        }
     }
 
     private var kindIcon: String {
@@ -486,7 +542,13 @@ struct BigGroupRow: View {
     }
 
     @ViewBuilder private var priorityCell: some View {
-        if ourThrottled > 0 && ourThrottled == group.count {
+        if let c = capRecord {
+            VStack(alignment: .leading, spacing: 1) {
+                Pill(text: "cap \(Int(c.percent))%", tone: .warn, accent: accent)
+                Text(String(format: "at %.1f%%", c.achieved))
+                    .font(.system(size: UI.chip)).monospacedDigit().foregroundStyle(.tertiary)
+            }
+        } else if ourThrottled > 0 && ourThrottled == group.count {
             Pill(text: "background", tone: .accent, accent: accent)
         } else if ourThrottled > 0 {
             Pill(text: "mixed", tone: .neutral, accent: accent)
@@ -502,17 +564,52 @@ struct BigGroupRow: View {
             }
             .foregroundStyle(.tertiary)
             .help("Protected — slowing this would hurt system stability")
-        } else if ourThrottled > 0 {
-            Button("Restore") { monitor.restoreGroup(group) }
-                .buttonStyle(.glass).font(.system(size: UI.caption))
         } else {
-            Button("Slow down") {
-                // Big apps (a browser is 90+ helpers) get a confirm so a stray
-                // click can't silently background a whole tree.
-                if group.count > 8 { confirmBulk = true } else { monitor.throttleGroup(group) }
+            HStack(spacing: 6) {
+                if ourThrottled > 0 {
+                    Button("Restore") { monitor.restoreGroup(group) }
+                        .buttonStyle(.glass).font(.system(size: UI.caption))
+                } else {
+                    Button("Slow down") {
+                        // Big apps (a browser is 90+ helpers) get a confirm so a stray
+                        // click can't silently background a whole tree.
+                        if group.count > 8 { confirmBulk = true } else { monitor.throttleGroup(group) }
+                    }
+                    .buttonStyle(.glass).font(.system(size: UI.caption))
+                }
+                capMenu
             }
-            .buttonStyle(.glass).font(.system(size: UI.caption))
         }
+    }
+
+    /// The hard cap lives behind a menu rather than a button: it's the sharper
+    /// tool of the two and shouldn't be one stray click away.
+    private var capMenu: some View {
+        Menu {
+            if let c = capRecord {
+                Text(String(format: "Capped at %d%% — currently %.1f%%", Int(c.percent), c.achieved))
+                Button("Remove cap") { monitor.clearCap(group) }
+                Divider()
+            }
+            ForEach(Monitor.capChoices, id: \.self) { pct in
+                Button("Cap at \(Int(pct))% of a core") { requestCap(pct) }
+            }
+            if let why = monitor.capRefusal(group) {
+                Divider()
+                Text("Can't cap — \(why)")
+            }
+        } label: {
+            glyph("speedometer", UI.body).foregroundStyle(capRecord == nil ? .secondary : .primary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(capRecord == nil && monitor.capRefusal(group) != nil)
+        .help("Hard CPU cap — holds \(group.name) under a set percentage by suspending and resuming it. Stricter than Slow down, and blunter: a suspended app can't respond until it's resumed.")
+    }
+
+    private func requestCap(_ pct: Double) {
+        if monitor.capAcknowledged { monitor.setCap(group, percent: pct) } else { pendingCap = pct }
     }
 
     // Real tabs for a scriptable browser: names you recognise, double-click to
@@ -669,7 +766,7 @@ private struct BigChildRow: View {
                         .buttonStyle(.glass).font(.system(size: UI.chip))
                 }
             }
-            .frame(width: 116, alignment: .trailing)
+            .frame(width: 150, alignment: .trailing)
         }
         .padding(.horizontal, 22).frame(height: 36)
         .background(hovering ? Color.primary.opacity(0.05) : Color.primary.opacity(0.02))
@@ -701,7 +798,7 @@ private struct CPUCell: View {
     }
 }
 
-private enum Tone { case accent, green, neutral }
+private enum Tone { case accent, green, neutral, warn }
 
 private struct Pill: View {
     var text: String
@@ -719,6 +816,9 @@ private struct Pill: View {
         case .accent: return accent
         case .green: return .green
         case .neutral: return .secondary
+        // A cap suspends the app — it should not look like the same routine,
+        // fully-reversible state that "slowed" does.
+        case .warn: return .orange
         }
     }
     private var bg: some ShapeStyle {
@@ -726,6 +826,7 @@ private struct Pill: View {
         case .accent: return AnyShapeStyle(accent.opacity(0.16))
         case .green: return AnyShapeStyle(Color.green.opacity(0.16))
         case .neutral: return AnyShapeStyle(.quaternary)
+        case .warn: return AnyShapeStyle(Color.orange.opacity(0.18))
         }
     }
 }
