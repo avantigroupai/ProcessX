@@ -7,10 +7,35 @@ dependencies.
 ## Build & install
 
 ```sh
-./bundle.sh                      # -> build/ProcessX.app
+./bundle.sh                      # -> build/ProcessX.app (universal, signed, notarized)
 cp -R build/ProcessX.app /Applications/
 open /Applications/ProcessX.app
+
+ARCHES=arm64 ./bundle.sh         # fast local build, host arch only
+NOTARIZE=no ./bundle.sh          # skip the Apple round-trip
 ```
+
+`bundle.sh` builds **universal** (arm64 + x86_64) by default. macOS 26 is the
+last release supporting Intel Macs and they are still in the supported set — an
+arm64-only bundle fails to launch there, and notarization does not catch it.
+
+Signing follows what a first launch actually sees. Ad-hoc is enough to run
+locally but a *downloaded* ad-hoc bundle is refused outright; a Developer ID
+signature alone still gets "Apple cannot check it for malicious software". Only
+signed + notarized + stapled opens cleanly, so `bundle.sh` does all three
+whenever a Developer ID certificate is present, then asserts the result with
+`spctl --assess` — the string that matters is `source=Notarized Developer ID`.
+
+Notarization credentials come from a `notarytool` keychain profile, created once:
+
+```sh
+xcrun notarytool store-credentials ProcessX-Notary \
+  --apple-id you@example.com --team-id TEAMID
+```
+
+A profile is per Apple ID + team, **not** per app, so an existing profile for the
+same team works as-is — `bundle.sh` probes for one rather than requiring a
+particular name. Set `NOTARY_PROFILE` to pin it.
 
 `bundle.sh` copies `AppIcon.icns` (the blue heartbeat mark) into the bundle. To
 change the icon, edit `assets/make_icon.swift` and run `assets/build_icon.sh`,
@@ -29,9 +54,17 @@ swift run -c release ProcessX --render out.png --dark   # rasterise the UI
 
 `--selftest` exercises the real stack end-to-end: it spawns its own busy child
 process, throttles it through the same code path a button click uses, and asserts
-the *kernel* moved it to the background band and back. It also asserts the
-sampler reads that child at ~100% of a core — the guard against the mach-ticks
-bug described below.
+the *kernel* moved it to the background band and back. For the cap it runs a real
+SIGSTOP/SIGCONT duty cycle, kills a stand-in parent to prove the guardian resumes
+after a `SIGKILL`, and checks nothing is left suspended afterwards.
+
+Checks that assert an **absolute CPU percentage** report `SKIP` rather than `FAIL`
+when the machine has more than 1.5 runnable threads per core: a spinning child
+cannot reach 100% of a core against a deep run queue, and the people most likely
+to run `--selftest` are by definition on a Mac that is too busy. The skip line
+prints what it measured, so a real regression is still visible. Mechanism checks
+— does the duty cycle engage, does anything stay suspended, does the guardian
+resume — are load-independent and always assert.
 
 ## How it differs from the Node version (`../`)
 
@@ -59,7 +92,9 @@ nanoseconds.** On Apple Silicon the timebase is 125/3, so treating ticks as ns
 under-reports CPU by ~41× — auto-tame would never fire and the CPU tile would
 read ~2% on a maxed machine. On Intel `numer == denom == 1`, so this bug is
 invisible there. `Sampler.ticksToNanos` converts explicitly; the self-test asserts
-a known-busy process reads ~100%.
+a known-busy process reads ~100% — a magnitude, not "> 0", because "> 0" would
+have passed while being 41× wrong. That assertion is the one that has to stand
+down on an oversubscribed machine, since the child cannot get a core to read.
 
 **A low `pti_priority` does not mean *we* throttled it.** Browsers park their own
 inactive tabs in the background band. Using the kernel band to label rows "slowed"
@@ -90,3 +125,10 @@ browsers (e.g. Firefox) still expand to their renderer processes. See
 - Records are identity-guarded by executable path, so a recycled PID is never
   acted on.
 - Auto-tame is **off** by default.
+- The **hard CPU cap** is the one action that suspends, so it is gated harder
+  than the rest: no override for media and call apps, no terminals or shells,
+  nothing already suspended by something else, never the foreground group, and
+  released the moment the app comes to the front. A cap survives nothing — the
+  pid list is written to disk before the first `SIGSTOP`, a signal handler
+  resumes on any catchable fatal signal, and a detached guardian process resumes
+  after a `SIGKILL`.
