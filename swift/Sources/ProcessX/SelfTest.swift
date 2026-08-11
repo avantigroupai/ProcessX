@@ -16,6 +16,14 @@ enum SelfTest {
     static func run() {
         print("ProcessX self-test\n")
 
+        // Redirect the cap recovery record before anything else: the [monitor]
+        // section below constructs a real Monitor, whose init releases orphaned
+        // caps. Pointed at the real file that would resume — and forget — the caps
+        // of a ProcessX instance running right now.
+        let tmpCaps = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("processx-selftest-caps-\(getpid()).json")
+        CapPersistence.url = tmpCaps
+
         print("[media guard] helper binaries inside protected bundles")
         let mediaCases: [(String, Bool)] = [
             ("/Applications/zoom.us.app/Contents/MacOS/zoom.us", true),
@@ -155,6 +163,244 @@ enum SelfTest {
                 check("monitor path", false, "\(error)")
             }
         }
+
+        print("\n[cap policy] what a hard cap may never suspend")
+        let uid = getuid(), me = getpid()
+        func sample(_ name: String, _ path: String, stopped: Bool = false) -> ProcSample {
+            ProcSample(pid: 9001, ppid: 1, uid: uid, name: name, path: path,
+                       rss: 1, priority: 26, cpuPct: 90, isStopped: stopped)
+        }
+        check("refuses a terminal (you'd freeze your own way back)",
+              Policy.capIneligibleReason(sample("Ghostty", "/Applications/Ghostty.app/Contents/MacOS/Ghostty"),
+                                         myUID: uid, selfPID: me) != nil)
+        check("refuses a shell",
+              Policy.capIneligibleReason(sample("zsh", "/bin/zsh"), myUID: uid, selfPID: me) != nil)
+        // Unlike Slow down, there is no manual override here: a dropped call is
+        // not undone by lifting the cap afterwards.
+        check("refuses a call app even on an explicit click",
+              Policy.capIneligibleReason(sample("zoom.us", "/Applications/zoom.us.app/Contents/MacOS/zoom.us"),
+                                         myUID: uid, selfPID: me) != nil)
+        check("refuses a process someone else already suspended",
+              Policy.capIneligibleReason(sample("node", "/opt/homebrew/bin/node", stopped: true),
+                                         myUID: uid, selfPID: me) != nil)
+        check("allows an ordinary background hog",
+              Policy.capIneligibleReason(sample("ffmpeg", "/opt/homebrew/bin/ffmpeg"),
+                                         myUID: uid, selfPID: me) == nil)
+
+        print("\n[cap] real SIGSTOP/SIGCONT duty cycle against our own child")
+
+        func burner() -> Process {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/yes")
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            return p
+        }
+        /// True interval CPU for one pid, % of a core.
+        func measure(_ pid: pid_t, _ seconds: Double) -> Double {
+            let s = Sampler()
+            _ = s.sample()
+            Thread.sleep(forTimeInterval: seconds)
+            return s.sample().first { $0.pid == pid }?.cpuPct ?? 0
+        }
+        /// Single-pid status read — cheap enough to poll, unlike a full table walk.
+        func stopped(_ pid: pid_t) -> Bool {
+            var info = proc_bsdinfo()
+            let n = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size))
+            return n == Int32(MemoryLayout<proc_bsdinfo>.size) && info.pbi_status == Sampler.stoppedStatus
+        }
+        /// Did this pid spend any of the window suspended? Polling for the stop
+        /// edge tests the duty cycle itself, which — unlike a CPU percentage —
+        /// means the same thing on an idle machine and a saturated one.
+        func everStopped(_ pid: pid_t, over seconds: Double) -> Bool {
+            let step = 0.02
+            for _ in 0..<Int(seconds / step) {
+                if stopped(pid) { return true }
+                Thread.sleep(forTimeInterval: step)
+            }
+            return false
+        }
+
+        let capper = Capper()
+        let hog = burner()
+        do {
+            try hog.run()
+            let pid = hog.processIdentifier
+            Thread.sleep(forTimeInterval: 0.5)
+            let path = executablePath(of: pid) ?? "/usr/bin/yes"
+
+            check("uncapped child is never suspended", !everStopped(pid, over: 0.6))
+            // What one core is worth to this process right now. On a saturated
+            // machine that is nowhere near 100%, so the cap is judged against what
+            // the process actually gets rather than against a fixed number.
+            let free = measure(pid, 1.2)
+            check("uncapped child gets CPU", free > 1, String(format: "%.1f%% of a core", free))
+
+            // Cap at a quarter of what this machine is actually giving it. A fixed
+            // target would be a no-op under heavy load — correctly, since a cap is
+            // a ceiling — and the duty cycle would never engage to be tested.
+            let targetPct = max(free * 0.25, 1)
+            capper.set(key: "selftest", name: "yes", percent: targetPct,
+                       targets: [CapTarget(pid: pid, path: path)])
+            Thread.sleep(forTimeInterval: 2.0)                 // let the loop converge
+            check("cap suspends it as part of the duty cycle", everStopped(pid, over: 1.0))
+            let held = measure(pid, 2.0)
+            check("cap never freezes it outright", held > 0, String(format: "%.2f%% while capped", held))
+            // Room for the loop to hunt, but well short of `free` — a cap that did
+            // nothing would land back at `free` and fail this.
+            let ceiling = max(targetPct * 2.2, 3)
+            check("cap holds CPU at or below its target", held <= ceiling,
+                  String(format: "free %.1f%% -> capped %.1f%% at a %.1f%% cap (ceiling %.1f%%)",
+                         free, held, targetPct, ceiling))
+            check("recovery record written while capped",
+                  CapPersistence.read().contains { $0.targets.contains { $0.pid == pid } })
+
+            capper.clear("selftest")
+            Thread.sleep(forTimeInterval: 0.8)
+            // The failure this guards against is a stranded continuation still
+            // stopping the process after the cap is gone — which a single status
+            // read would miss four times out of five.
+            check("no duty cycle survives the uncap", !everStopped(pid, over: 1.0))
+            check("recovery record cleared", CapPersistence.read().isEmpty)
+
+            // The handler that runs when we crash. kill(2) is the only call it makes.
+            CapEmergency.set([pid])
+            _ = kill(pid, SIGSTOP)
+            Thread.sleep(forTimeInterval: 0.3)
+            check("child really is suspended", stopped(pid))
+            CapEmergency.resumeAll()
+            Thread.sleep(forTimeInterval: 0.3)
+            check("emergency resume unfreezes it", !stopped(pid))
+            CapEmergency.set([])
+
+            hog.terminate()
+        } catch {
+            check("spawn cap test child", false, "\(error)")
+        }
+
+        print("\n[cap via Monitor] the real menu-click path, and that a cap survives ticking")
+        MainActor.assumeIsolated {
+            let m = Monitor()
+
+            // A child of this process inherits our place in the tree — run from a
+            // terminal that makes it part of the frontmost terminal *session*, which
+            // is exactly what a cap must refuse. Spawn through a shell that exits, so
+            // the burner is reparented to launchd and lands in a background group.
+            let spawn = Process()
+            spawn.executableURL = URL(fileURLWithPath: "/bin/sh")
+            spawn.arguments = ["-c", "/usr/bin/yes > /dev/null 2>&1 & echo $!"]
+            let pipe = Pipe()
+            spawn.standardOutput = pipe
+            do {
+                try spawn.run()
+                let out = pipe.fileHandleForReading.readDataToEndOfFile()
+                spawn.waitUntilExit()
+                guard let pid = pid_t(String(decoding: out, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                    check("spawned a detached burner", false, "no pid on stdout"); return
+                }
+                Thread.sleep(forTimeInterval: 0.6)
+                m.tick()
+
+                guard let key = m.model.byPID[pid]?.groupKey, let g = m.model.group(for: key) else {
+                    check("detached burner is in the model", false); return
+                }
+                check("detached burner's group can be capped", m.capRefusal(g) == nil,
+                      m.capRefusal(g) ?? "eligible")
+
+                m.setCap(g, percent: 5)
+                check("Monitor records the cap", m.isCapped(key))
+                check("cap suspends the target", everStopped(pid, over: 1.5))
+
+                // The regression this exists for: reconcileCaps re-resolves each
+                // cap's pids from a fresh sample, and a capped process is stopped
+                // most of the time. If that reads as "someone else suspended it",
+                // the cap deletes itself on the very next tick.
+                for _ in 0..<3 { m.tick(); Thread.sleep(forTimeInterval: 0.4) }
+                check("cap survives three sampling ticks", m.isCapped(key))
+                check("still holding its target after ticking", !(m.cap(forKey: key)?.targets.isEmpty ?? true))
+                check("ProcessX never capped itself",
+                      m.cap(forKey: key)?.targets.contains { $0.pid == getpid() } == false)
+
+                m.clearCap(key: key, name: "burner")
+                Thread.sleep(forTimeInterval: 0.5)
+                check("Monitor drops the cap", !m.isCapped(key))
+                check("nothing left suspended by the Monitor path", !everStopped(pid, over: 1.0))
+
+                // SIGCONT first: a stopped process never sees a SIGTERM, so killing
+                // a capped process in the wrong order leaves it running forever.
+                _ = kill(pid, SIGCONT)
+                _ = kill(pid, SIGTERM)
+            } catch {
+                check("Monitor cap path", false, "\(error)")
+            }
+
+            // The other half of the same rule: a CLI session hosted by the frontmost
+            // terminal is foreground, and must be refused however it is reached.
+            let inTerminal = burner()
+            do {
+                try inTerminal.run()
+                Thread.sleep(forTimeInterval: 0.6)
+                m.tick()
+                let pid = inTerminal.processIdentifier
+                if let key = m.model.byPID[pid]?.groupKey, let g = m.model.group(for: key),
+                   m.model.isFront(key) {
+                    check("refuses to cap a CLI session in the frontmost terminal",
+                          m.capRefusal(g) != nil, m.capRefusal(g) ?? "allowed it")
+                } else {
+                    check("refuses to cap a CLI session in the frontmost terminal", true,
+                          "skipped — not launched from a frontmost terminal")
+                }
+                inTerminal.terminate()
+            } catch {
+                check("frontmost-session refusal", false, "\(error)")
+            }
+        }
+
+        print("\n[cap guardian] the SIGKILL path — a separate process resumes for us")
+        let orphan = burner()
+        let doomed = Process()
+        doomed.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        doomed.arguments = ["30"]
+        do {
+            try orphan.run()
+            try doomed.run()
+            Thread.sleep(forTimeInterval: 0.4)
+            let pid = orphan.processIdentifier
+            let path = executablePath(of: pid) ?? "/usr/bin/yes"
+
+            // Stand in for a capped app whose owner is about to die uncleanly.
+            CapPersistence.write([CapRecord(key: "selftest", name: "yes", percent: 10,
+                                            targets: [CapTarget(pid: pid, path: path)], at: Date())])
+            _ = kill(pid, SIGSTOP)
+            check("stand-in capped process is suspended", stopped(pid))
+
+            let guard1 = Process()
+            guard1.executableURL = Bundle.main.executableURL
+            guard1.arguments = ["--cap-guardian", String(doomed.processIdentifier), tmpCaps.path]
+            guard1.standardOutput = FileHandle.nullDevice
+            guard1.standardError = FileHandle.nullDevice
+            try guard1.run()
+            Thread.sleep(forTimeInterval: 0.5)
+
+            doomed.terminate()
+            doomed.waitUntilExit()        // reap it, or the guardian sees a zombie
+
+            // Wait for the resume instead of guessing how long a cold binary
+            // launch takes: on a loaded machine that is seconds, not milliseconds,
+            // and a fixed sleep turns a working guardian into a flaky test.
+            var waited = 0.0
+            while stopped(pid), waited < 8 { Thread.sleep(forTimeInterval: 0.1); waited += 0.1 }
+            check("guardian resumed the process after its owner died", !stopped(pid),
+                  String(format: "after %.1fs", waited))
+            check("guardian cleared the recovery record", CapPersistence.read().isEmpty)
+
+            _ = kill(pid, SIGCONT)        // whatever happened above, don't leave it stopped
+            orphan.terminate()
+        } catch {
+            check("cap guardian round-trip", false, "\(error)")
+        }
+        try? FileManager.default.removeItem(at: tmpCaps)   // run() ends in exit(); no defer
 
         print("\n[system] memory / GPU / frontmost via system APIs")
         let mem = SystemStats.memory()

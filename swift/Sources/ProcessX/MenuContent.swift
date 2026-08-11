@@ -43,6 +43,17 @@ struct MenuContent: View {
             Image.glyph("waveform.path.ecg").font(.system(size: ms(14)))
             Text("ProcessX").font(.system(size: ms(14), weight: .semibold))
             Spacer()
+            // A cap suspends processes, so releasing one must always be reachable
+            // from the menu bar — without needing to raise the main window.
+            if !monitor.caps.isEmpty {
+                Button {
+                    monitor.clearAllCaps()
+                } label: {
+                    Label("Release caps (\(monitor.caps.count))", systemImage: "speedometer")
+                }
+                .buttonStyle(.bordered).controlSize(.large).font(.system(size: ms(11)))
+                .help("Remove every hard CPU cap — capped apps stop being suspended.")
+            }
             if !monitor.throttled.isEmpty {
                 Button {
                     monitor.restoreAll()
@@ -165,6 +176,7 @@ struct GroupRow: View {
 
     /// How many of this group's processes *we* put in the background band.
     private var ourThrottled: Int { group.procs.filter { monitor.isThrottledByUs($0.pid) }.count }
+    private var capRecord: CapRecord? { monitor.cap(forKey: group.key) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -191,6 +203,7 @@ struct GroupRow: View {
                 // "slowed" means WE slowed it. The kernel band alone would light up
                 // every browser's own backgrounded tabs and offer a dead Restore.
                 if ourThrottled > 0 { Chip(text: ourThrottled == group.count ? "slowed" : "\(ourThrottled) slowed") }
+                if let c = capRecord { Chip(text: "capped \(Int(c.percent))%") }
 
                 Spacer(minLength: ms(4))
                 Text(String(format: "%.1f%%", group.cpu))
@@ -269,6 +282,11 @@ struct GroupRow: View {
             }
             .foregroundStyle(.tertiary)
             .help("Protected — slowing this would hurt system stability")
+        } else if capRecord != nil {
+            // Caps are set from the main window; the menu only ever releases one.
+            Button("Uncap") { monitor.clearCap(group) }
+                .buttonStyle(.bordered).controlSize(.regular).font(.system(size: ms(10)))
+                .help("Stop suspending \(group.name) — it runs at full speed again")
         } else if ourThrottled > 0 {
             Button("Restore") { monitor.restoreGroup(group) }
                 .buttonStyle(.bordered).controlSize(.regular).font(.system(size: ms(10)))
