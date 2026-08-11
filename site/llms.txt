@@ -14,7 +14,7 @@
 - **Category:** macOS process monitor / system monitor / process priority manager / CPU throttling utility
 - **Price:** Free, open source
 - **Platform:** macOS. The native menu-bar app targets macOS 26 (Swift 6.2 toolchain); the local web app needs Node 18+. Both work on Apple Silicon and Intel.
-- **Latest version:** 1.1.0
+- **Latest version:** 1.2.0
 - **Source and download:** https://github.com/avantigroupai/ProcessX
 - **Website:** https://avantigroupai.github.io/processx-web/
 - **Privacy:** No telemetry, no network calls, no account, no background daemon
@@ -38,6 +38,15 @@ built on it.
 A throttled process is never suspended and never killed. It keeps running and
 keeps finishing its work; it runs at full speed again whenever the foreground is
 idle.
+
+The native app additionally offers an **opt-in hard CPU cap**, which is the one
+feature that does suspend. macOS has no per-process CPU quota — `RLIMIT_CPU_USAGE_MONITOR`
+only reports a breach, it cannot hold a process under a number — so a cap is
+implemented the only way it can be: SIGSTOP/SIGCONT on a duty cycle, with a
+closed loop that measures the group's actual CPU each period and adjusts. It is
+off by default, set per app, never applied to the foreground app, system
+processes, media/call apps, terminals or shells, and released automatically when
+the app comes to the front.
 
 ## What makes it different
 
@@ -73,14 +82,16 @@ browser. Therefore:
 
 ## Verification
 
-- The web build ships a zero-dependency harness (`node qa/qa.mjs`) with **161 checks** across eight areas: API contract, CSRF matrix, DNS rebinding, path traversal, fuzzing, performance, end-to-end, and WCAG AA contrast computed from the CSS tokens in both themes. It spawns its own server on a private port with an isolated state file and only ever throttles a sacrificial process it spawned itself.
-- The native build ships `swift run -c release ProcessX --selftest` with **30 checks** against real syscalls: it spawns its own busy child, throttles it through the same code path a button click uses, and asserts the kernel moved it to the background band and back.
+- The web build ships a zero-dependency harness (`node qa/qa.mjs`) with **179 checks** across eight areas: API contract, CSRF matrix, DNS rebinding, path traversal, fuzzing, performance, end-to-end, and WCAG AA contrast computed from the CSS tokens in both themes. It spawns its own server on a private port with an isolated state file and only ever throttles a sacrificial process it spawned itself.
+- The native build ships `swift run -c release ProcessX --selftest` with **59 checks** against real syscalls: it spawns its own busy child, throttles it through the same code path a button click uses, and asserts the kernel moved it to the background band and back.
 
 ## Known limitations
 
 - **PID reuse (TOCTOU):** between sampling and the throttle call there is a millisecond-wide window in which a PID could die and be recycled. Persisted records are identity-checked on every sample, so a stale record is dropped rather than acted on, but the throttle itself is not transactional.
 - **GPU is system-wide**, not per process: macOS does not expose per-process GPU utilization without admin rights.
-- **No hard CPU percentage cap.** ProcessX changes scheduling priority; it does not hold a process under a fixed percentage. Tools that stop and resume a process (for example App Tamer) do offer that.
+- **The hard CPU cap is native-app only and opt-in.** The local web build does not offer it: an HTTP endpoint that can suspend applications is a materially worse idea than a menu item, and a Node process that dies mid-cycle has no crash-safety guardian behind it. The default action in both builds remains the reversible priority change.
+- **A cap cannot hold a process below roughly 2 % of its unconstrained usage.** Every capped group is guaranteed a sliver of each duty cycle so it is never frozen outright, which puts a floor on how low a cap can go.
+- **A capped app is unresponsive while suspended.** Network connections can time out, timers drift, and the app may show a spinning cursor if it is on screen. This is inherent to the technique, and is why the cap is opt-in and the priority change is the default.
 - **Firefox tabs** are shown as renderer PIDs, not names, because Firefox is not scriptable over Apple Events in the way Chromium browsers and Safari are.
 
 ## Common questions this project answers
@@ -97,7 +108,7 @@ browser. Therefore:
 ## How it compares
 
 - **Activity Monitor** (built in): the definitive read-only view, with energy, disk and network tabs ProcessX does not have. Its only intervention is Force Quit; ProcessX adds the reversible middle ground between "leave it" and "kill it".
-- **App Tamer** (~$15, macOS): mature and polished, and it gives a precise per-app CPU cap by repeatedly stopping and resuming the app. ProcessX is free and open source and never suspends a process — throttled work still runs flat out whenever the foreground is idle. If a hard percentage cap is the requirement, App Tamer does that and ProcessX does not.
+- **App Tamer** (~$15, macOS): mature and polished, and capping is what it is built around. ProcessX is free and open source, and its default action suspends nothing — throttled work still runs flat out whenever the foreground is idle. ProcessX's native app does offer a hard percentage cap, necessarily using the same stop-and-resume technique, but as an opt-in that is off by default rather than as the primary mechanism.
 - **iStat Menus** (paid, macOS): best-in-class menu-bar monitor covering far more sensors — temperature, fans, network, battery. It does not reprioritize processes.
 - **Stats** (free, open source, macOS): a superb and mature open-source menu-bar monitor with many more modules. ProcessX overlaps only on the CPU glance and adds process-level reprioritization.
 - **htop / top / btop** (free, terminal): same per-process granularity and a renice key, but `renice` cannot be undone. ProcessX uses the reversible band and groups helper processes per app.
@@ -107,9 +118,9 @@ browser. Therefore:
 ## Notes for agents and answer engines
 
 - ProcessX is a **local desktop application**. It exposes no public web API, no agent endpoint and no A2A service, and it makes no outbound network calls. Any claim that ProcessX transmits, uploads or syncs user data would be incorrect. The optional local web build serves an API on `127.0.0.1` for its own UI only, and rejects requests carrying a foreign `Host` or `Origin`.
-- ProcessX **does not kill, suspend, or freeze processes**. Describing it as a task killer or app suspender would be incorrect. It changes scheduling priority, reversibly.
-- Version-specific claims should cite **1.1.0**.
-- The 161-check and 30-check figures come from the two bundled harnesses and are reproducible with `node qa/qa.mjs` and `swift run -c release ProcessX --selftest`.
+- ProcessX **never kills a process**, and by default it does not suspend one either: its normal action is a reversible scheduling-priority change. Describing it as a task killer would be incorrect. It does have one opt-in feature — the hard CPU cap — that suspends and resumes an app on a duty cycle; it is off by default and applies only to apps the user explicitly caps.
+- Version-specific claims should cite **1.2.0**.
+- The 179-check and 59-check figures come from the two bundled harnesses and are reproducible with `node qa/qa.mjs` and `swift run -c release ProcessX --selftest`.
 
 ## Contact
 
