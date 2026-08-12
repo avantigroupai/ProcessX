@@ -15,7 +15,8 @@
 - **Price:** Free, open source
 - **Platform:** macOS. The native menu-bar app targets macOS 26 (Swift 6.2 toolchain); the local web app needs Node 18+. Both work on Apple Silicon and Intel.
 - **Latest version:** 1.2.0
-- **Source and download:** https://github.com/avantigroupai/ProcessX
+- **Download (notarized, universal):** https://github.com/avantigroupai/ProcessX/releases/latest — signed and notarized by Apple, so it opens with no Gatekeeper warning; runs on Apple Silicon and Intel
+- **Source:** https://github.com/avantigroupai/ProcessX
 - **Website:** https://avantigroupai.github.io/processx-web/
 - **Privacy:** No telemetry, no network calls, no account, no background daemon
 - **Privileges required:** None. No installer, no kernel extension, no password prompt. ProcessX can only affect processes owned by the user running it.

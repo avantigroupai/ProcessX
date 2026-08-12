@@ -39,9 +39,11 @@
       "processorRequirements": "Apple Silicon or Intel",
       "description": "Free, open-source macOS process and priority monitor. Shows live CPU, GPU and memory, groups processes per app the way Activity Monitor does, and moves CPU hogs into the macOS background resource band with one click — fully reversible, no admin rights, no telemetry. Ships as a native Swift menu-bar app and as a zero-dependency local web app.",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-      "downloadUrl": "https://github.com/avantigroupai/ProcessX",
+      "downloadUrl": "https://github.com/avantigroupai/ProcessX/releases/latest",
+      "installUrl": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.0",
+      "releaseNotes": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.0",
       "softwareVersion": "1.2.0",
-      "datePublished": "2026-08-11",
+      "datePublished": "2026-08-12",
       "isAccessibleForFree": true,
       "license": "https://github.com/avantigroupai/ProcessX",
       "codeRepository": "https://github.com/avantigroupai/ProcessX",
@@ -375,7 +377,7 @@
       <a href="#alternatives">Alternatives</a>
       <a href="#faq">FAQ</a>
       <a href="contact/">Contact</a>
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX">Get it</a>
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/latest">Download</a>
     </div>
   </div>
 </nav>
@@ -387,9 +389,9 @@
     <h1>Your Mac isn't slow. <span class="muted">It's just badly scheduled.</span></h1>
     <p class="lede">Some background process — a build, an encode, sixty browser tabs, a long-running AI coding session — is taking every core it can get, and the app in front of you is fighting it for CPU. ProcessX moves the hog into the macOS <strong>background band</strong> with one click. It keeps running. You get your Mac back. <strong>Fully reversible</strong>, no admin rights.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX">
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/latest">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        Get ProcessX
+        Download 1.2.0
       </a>
       <a class="btn btn-ghost" href="#how">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M9 18l6-6-6-6"/></svg>
@@ -799,20 +801,22 @@ npm test         <span class="c"># 179 checks</span></div>
     <h2>Get your Mac back.</h2>
     <p>Free and open source. No installer, no admin rights, no telemetry — and every change it makes is one click away from being undone.</p>
     <div class="cta-actions">
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX">
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/latest">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        Get ProcessX on GitHub
+        Download ProcessX 1.2.0
       </a>
+      <a class="btn btn-ghost" href="https://github.com/avantigroupai/ProcessX">Source on GitHub</a>
       <a class="btn btn-ghost" href="https://github.com/avantigroupai/ProcessX/issues">Report an issue</a>
     </div>
 
     <div class="install">
       <h3>Native menu-bar app</h3>
-      <p>Requires macOS 26 and a Swift 6.2 toolchain. <span class="mono">bundle.sh</span> produces a signed-for-local-use app bundle with its icon.</p>
+      <p><a href="https://github.com/avantigroupai/ProcessX/releases/latest">Download the notarized build</a> — universal (Apple Silicon and Intel), signed and notarized, so it opens with no Gatekeeper warning. Unzip, drag to Applications. Requires macOS 26.</p>
+      <p style="margin-top:16px">Or build it yourself with a Swift 6.2 toolchain — <span class="mono">bundle.sh</span> produces the same universal bundle, signed with whatever identity you have:</p>
       <div class="codeblock" style="margin-top:16px">git clone <span class="p">https://github.com/avantigroupai/ProcessX.git</span>
 cd ProcessX/swift <span class="c">&amp;&amp;</span> ./bundle.sh
 cp -R build/ProcessX.app /Applications/
-swift run -c release ProcessX --selftest   <span class="c"># 30 real-syscall checks</span></div>
+swift run -c release ProcessX --selftest   <span class="c"># 59 real-syscall checks</span></div>
       <h3 style="margin-top:32px">Local web app</h3>
       <p>Node 18 or later. No npm install step — there are no dependencies to install.</p>
       <div class="codeblock" style="margin-top:16px">cd ProcessX
