@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Sending Apple Events to another application is blocked under the
+         hardened runtime unless this entitlement is present. ProcessX needs it
+         for one feature: asking a browser for its open tabs by name, and
+         switching to one (BrowserTabs.swift).
+
+         Without it the failure is actively misleading rather than merely
+         missing. A blocked Apple Event returns -1743, errAEEventNotPermitted —
+         the identical code macOS returns when the user has denied Automation
+         permission. BrowserTabs maps -1743 to "not-permitted" and the row
+         offers "Allow ProcessX to control Chrome... Open Settings", so the user
+         is sent to grant a permission they may already have, and it still
+         fails. The self-test asserts this entitlement is present whenever the
+         hardened runtime flag is set, because the two must ship together.
+
+         Nothing else is claimed. No JIT, no unsigned executable memory, no
+         disabled library validation: ProcessX loads no plug-ins and no
+         third-party code, and every hardened-runtime exception is attack
+         surface that has to be justified rather than copied in. Full Disk
+         Access and Automation are TCC grants the user makes, not entitlements.
+    -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>

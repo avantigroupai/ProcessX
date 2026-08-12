@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Security
 
 /// `ProcessX --selftest` — exercises the real syscall stack headlessly:
 /// libproc sampling, the grouping heuristics, the media guard, and an actual
@@ -41,6 +42,27 @@ enum SelfTest {
 
     private static func skip(_ name: String, _ reason: String) {
         print("  SKIP  \(name)  — \(reason)")
+    }
+
+    /// Our own code signature: whether the hardened runtime is on, and what
+    /// entitlements were actually embedded. Read from the running binary rather
+    /// than from the entitlements file on disk — the file is the intent, the
+    /// signature is what shipped, and the whole class of bug here is the two
+    /// disagreeing.
+    private static func ownSigningInfo() -> (hardened: Bool, entitlements: [String: Any])? {
+        var code: SecCode?
+        guard SecCodeCopySelf(SecCSFlags(rawValue: 0), &code) == errSecSuccess, let code else { return nil }
+        var stat: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, SecCSFlags(rawValue: 0), &stat) == errSecSuccess,
+              let stat else { return nil }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(stat, SecCSFlags(rawValue: kSecCSSigningInformation),
+                                            &info) == errSecSuccess,
+              let dict = info as? [String: Any] else { return nil }
+        let entitlements = dict[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
+        // kSecCodeSignatureRuntime — the hardened runtime bit in the code directory.
+        let flags = (dict[kSecCodeInfoFlags as String] as? UInt32) ?? 0
+        return (flags & 0x10000 != 0, entitlements)
     }
 
     @MainActor
@@ -278,7 +300,14 @@ enum SelfTest {
                        targets: [CapTarget(pid: pid, path: path)])
             Thread.sleep(forTimeInterval: 2.0)                 // let the loop converge
             if measurable {
-                check("cap suspends it as part of the duty cycle", everStopped(pid, over: 1.0))
+                // Three seconds is fifteen nominal 200 ms periods. One second was
+                // enough on an idle machine and failed about one run in four under
+                // load: the cap queue's timers slip, stretching periods, and the
+                // polling thread is descheduled across the very windows it is
+                // watching for. The wide window is free in the passing case —
+                // everStopped returns on the first observation — and only extends
+                // the path that was about to report a failure that isn't real.
+                check("cap suspends it as part of the duty cycle", everStopped(pid, over: 3.0))
             } else {
                 skip("cap suspends it as part of the duty cycle",
                      String(format: "burner only got %.1f%% of a core; no headroom to cap", free))
@@ -445,6 +474,37 @@ enum SelfTest {
             check("cap guardian round-trip", false, "\(error)")
         }
         try? FileManager.default.removeItem(at: tmpCaps)   // run() ends in exit(); no defer
+
+        print("\n[signing] the hardened runtime and its entitlements must ship together")
+        if let (hardened, entitlements) = ownSigningInfo() {
+            if hardened {
+                // The bug this exists for: --options runtime is mandatory for
+                // notarization and silently blocks Apple Events. ProcessX sends
+                // them to read browser tabs, and a blocked event returns -1743,
+                // errAEEventNotPermitted — byte for byte what macOS returns when
+                // the user has denied Automation. BrowserTabs cannot tell the two
+                // apart, so the UI sends the user to System Settings to grant a
+                // permission that is already granted, and it still fails.
+                check("hardened runtime carries the apple-events entitlement",
+                      entitlements["com.apple.security.automation.apple-events"] as? Bool == true,
+                      "otherwise browser tabs fail as a fake permission denial")
+                // Every hardened-runtime exception is attack surface. ProcessX
+                // loads no plug-ins and no third-party code, so it should claim
+                // none of them — this fails if one is ever copied in unexamined.
+                for risky in ["com.apple.security.cs.disable-library-validation",
+                              "com.apple.security.cs.allow-unsigned-executable-memory",
+                              "com.apple.security.cs.allow-dyld-environment-variables"] {
+                    check("does not claim \(risky.replacingOccurrences(of: "com.apple.security.cs.", with: ""))",
+                          entitlements[risky] as? Bool != true)
+                }
+            } else {
+                skip("hardened runtime carries the apple-events entitlement",
+                     "not a hardened build (ad-hoc or unsigned) — nothing to assert")
+            }
+        } else {
+            skip("hardened runtime carries the apple-events entitlement",
+                 "could not read our own code signature")
+        }
 
         print("\n[system] memory / GPU / frontmost via system APIs")
         let mem = SystemStats.memory()

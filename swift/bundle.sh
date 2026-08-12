@@ -43,11 +43,11 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <dict>
   <key>CFBundleName</key><string>ProcessX</string>
   <key>CFBundleDisplayName</key><string>ProcessX</string>
-  <key>CFBundleIdentifier</key><string>local.processx</string>
+  <key>CFBundleIdentifier</key><string>dev.honato.processx</string>
   <key>CFBundleExecutable</key><string>ProcessX</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.2.0</string>
-  <key>CFBundleVersion</key><string>1.2.0</string>
+  <key>CFBundleShortVersionString</key><string>1.2.1</string>
+  <key>CFBundleVersion</key><string>1.2.1</string>
   <!-- Liquid Glass requires macOS 26. -->
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <!-- No LSUIElement: this is a real windowed app with a Dock icon.
@@ -76,6 +76,7 @@ echo "build stamp: $BUILD_STAMP"
 # that is the default whenever the certificate is present.
 #
 # Override the identity with SIGN_ID, or force the local path with SIGN_ID=-.
+ENTITLEMENTS="${ENTITLEMENTS:-Entitlements/ProcessX.entitlements}"
 SIGN_ID="${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null \
   | awk -F'"' '/Developer ID Application/ {print $2; exit}')}"
 
@@ -83,9 +84,14 @@ if [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ]; then
   # --options runtime is mandatory for notarization. --timestamp too: without a
   # secure timestamp the signature stops validating when the cert expires.
   # No --deep: Apple deprecated it, and this bundle is a single executable.
+  # The entitlements are not optional decoration: --options runtime blocks Apple
+  # Events, and ProcessX sends them to read browser tabs. Signing hardened
+  # without them ships a build whose tab feature fails with the same error code
+  # as a permission denial.
   codesign --force --sign "$SIGN_ID" --options runtime --timestamp \
-           "$APP/Contents/MacOS/ProcessX"
-  codesign --force --sign "$SIGN_ID" --options runtime --timestamp "$APP"
+           --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/ProcessX"
+  codesign --force --sign "$SIGN_ID" --options runtime --timestamp \
+           --entitlements "$ENTITLEMENTS" "$APP"
   echo "signed: $SIGN_ID"
 else
   codesign --force --sign - "$APP" 2>/dev/null || echo "note: ad-hoc signing skipped"

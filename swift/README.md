@@ -67,12 +67,12 @@ which redraws every size with CoreGraphics and recompiles the `.icns`.
 
 It's a windowed app with a Dock icon plus a menu-bar glance. Quit from the
 window or the popover's Quit button. To uninstall, quit it and drag the app to
-the Trash (settings live in `defaults delete local.processx`).
+the Trash (settings live in `defaults delete dev.honato.processx`).
 
 ## Verify
 
 ```sh
-swift run -c release ProcessX --selftest        # 59 checks, real syscalls
+swift run -c release ProcessX --selftest        # 63 checks, real syscalls
 swift run -c release ProcessX --render out.png --dark   # rasterise the UI
 ```
 
