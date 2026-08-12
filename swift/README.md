@@ -7,13 +7,22 @@ dependencies.
 ## Build & install
 
 ```sh
-./bundle.sh                      # -> build/ProcessX.app (universal, signed, notarized)
+./bundle.sh                      # -> build/ProcessX.app + build/ProcessX-<version>-universal.zip
 cp -R build/ProcessX.app /Applications/
 open /Applications/ProcessX.app
 
 ARCHES=arm64 ./bundle.sh         # fast local build, host arch only
 NOTARIZE=no ./bundle.sh          # skip the Apple round-trip
 ```
+
+Ship the zip `bundle.sh` produces — don't zip the app yourself. The notarization
+ticket is stapled *into* the `.app`, so a zip made before stapling contains an
+app with no ticket. That artifact still passes `spctl` on the machine that built
+it (Gatekeeper just asks Apple over the network) and still shows "Apple cannot
+check it for malicious software" to a user whose first launch is offline —
+nothing about the zip looks wrong. `bundle.sh` therefore builds it after
+stapling, then extracts it again and fails the build unless the extracted app
+validates its own ticket.
 
 `bundle.sh` builds **universal** (arm64 + x86_64) by default. macOS 26 is the
 last release supporting Intel Macs and they are still in the supported set — an
@@ -36,6 +45,21 @@ xcrun notarytool store-credentials ProcessX-Notary \
 A profile is per Apple ID + team, **not** per app, so an existing profile for the
 same team works as-is — `bundle.sh` probes for one rather than requiring a
 particular name. Set `NOTARY_PROFILE` to pin it.
+
+Two things that will otherwise cost you a release:
+
+- **A stored profile is invisible to the `security` CLI.** Neither
+  `security find-generic-password -s com.apple.gs.notary.tool` nor
+  `security dump-keychain` can see it — notarytool keeps it in the
+  data-protection keychain. Not finding it there is not evidence it is missing.
+  `xcrun notarytool history --keychain-profile <name>` is the only reliable
+  check, and is what the probe uses. (DiskX 1.0.2 shipped unnotarized on exactly
+  this mistake, with a working profile present under a different name.)
+- **A 403 "required agreement is missing or has expired" is an account
+  problem, not a build problem.** Signing and pre-submission checks all pass
+  first, so it looks like the artifact. Only the team's Account Holder can clear
+  it, at developer.apple.com → Account → Agreements. The notary service then
+  lags the account UI by a few minutes — don't re-diagnose during that window.
 
 `bundle.sh` copies `AppIcon.icns` (the blue heartbeat mark) into the bundle. To
 change the icon, edit `assets/make_icon.swift` and run `assets/build_icon.sh`,

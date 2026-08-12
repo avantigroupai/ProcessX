@@ -103,6 +103,11 @@ codesign --verify --strict --verbose=2 "$APP" 2>&1 | sed 's/^/  /'
 # team works — hence the probe rather than a hardcoded name. Set NOTARY_PROFILE
 # to pin one, or NOTARIZE=no to skip.
 find_notary_profile() {
+  # A stored profile is invisible to `security find-generic-password` and even to
+  # `security dump-keychain` — notarytool keeps it in the data-protection
+  # keychain. Absence there proves nothing; `notarytool history` is the only
+  # reliable existence check. (DiskX 1.0.2 shipped unnotarized on exactly this
+  # mistake: the profile existed under another name the whole time.)
   local candidates=("${NOTARY_PROFILE:-}" ProcessX-Notary WOS-Notary DiskX-Notary notarytool)
   for p in "${candidates[@]}"; do
     [ -z "$p" ] && continue
@@ -138,6 +143,7 @@ if [ "${NOTARIZE:-auto}" != "no" ] && [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ]
     # build reports "Unnotarized Developer ID" and still shows the Gatekeeper
     # dialog — so assert what a first launch actually sees instead of assuming.
     spctl --assess --type execute --verbose=2 "$APP" 2>&1 | sed 's/^/  /'
+    STAPLED=yes
   else
     echo "note: notarization did not succeed — signed, but a download will warn" >&2
   fi
@@ -145,4 +151,35 @@ elif [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ]; then
   echo "note: not notarized (no notarytool keychain profile found) — a download will warn"
 fi
 
+# The distribution zip.
+#
+# This has to be built HERE — after stapling — and the script has to be the one
+# that builds it. The ticket lives inside the .app, so a zip made before
+# `stapler staple` contains an app with no ticket: it still passes `spctl` on
+# this machine (Gatekeeper asks Apple online) and still shows the "Apple cannot
+# check it" dialog for a user who first launches it offline. Nothing about the
+# zip looks wrong. Doing it by hand after the build is one forgotten step away
+# from shipping that, so the ordering is encoded instead of remembered.
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+ARCH_TAG="$(echo "$ARCHES" | tr ' ' '\n' | sort | tr '\n' '-' | sed 's/-$//')"
+[ "$ARCH_TAG" = "arm64-x86_64" ] && ARCH_TAG=universal
+DIST_ZIP="build/ProcessX-${VERSION}-${ARCH_TAG}.zip"
+rm -f "$DIST_ZIP"
+ditto -c -k --keepParent "$APP" "$DIST_ZIP"
+
+# Assert on what a user unzips, not on the bundle we still have on disk.
+if [ "${STAPLED:-no}" = yes ]; then
+  VERIFY_DIR="$(mktemp -d)"
+  trap 'rm -rf "$VERIFY_DIR"' EXIT
+  ditto -x -k "$DIST_ZIP" "$VERIFY_DIR"
+  if xcrun stapler validate "$VERIFY_DIR/ProcessX.app" >/dev/null 2>&1; then
+    echo "dist zip verified: extracted app carries its own stapled ticket"
+  else
+    echo "ERROR: $DIST_ZIP extracts to an app with no stapled ticket." >&2
+    echo "       Shipping it would show the Gatekeeper dialog on offline first launch." >&2
+    exit 1
+  fi
+fi
+
 echo "built: $(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
+echo "dist:  $(cd "$(dirname "$DIST_ZIP")" && pwd)/$(basename "$DIST_ZIP")"
