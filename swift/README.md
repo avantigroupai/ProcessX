@@ -72,7 +72,7 @@ the Trash (settings live in `defaults delete dev.honato.processx`).
 ## Verify
 
 ```sh
-swift run -c release ProcessX --selftest        # 63 checks, real syscalls
+swift run -c release ProcessX --selftest        # 68 checks, real syscalls
 swift run -c release ProcessX --render out.png --dark   # rasterise the UI
 ```
 

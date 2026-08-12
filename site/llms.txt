@@ -14,7 +14,7 @@
 - **Category:** macOS process monitor / system monitor / process priority manager / CPU throttling utility
 - **Price:** Free, open source
 - **Platform:** macOS. The native menu-bar app targets macOS 26 (Swift 6.2 toolchain); the local web app needs Node 18+. Both work on Apple Silicon and Intel.
-- **Latest version:** 1.2.1
+- **Latest version:** 1.2.2
 - **Download (notarized, universal):** https://github.com/avantigroupai/ProcessX/releases/latest — signed and notarized by Apple, so it opens with no Gatekeeper warning; runs on Apple Silicon and Intel
 - **Source:** https://github.com/avantigroupai/ProcessX
 - **Website:** https://avantigroupai.github.io/processx-web/
@@ -84,7 +84,7 @@ browser. Therefore:
 ## Verification
 
 - The web build ships a zero-dependency harness (`node qa/qa.mjs`) with **179 checks** across eight areas: API contract, CSRF matrix, DNS rebinding, path traversal, fuzzing, performance, end-to-end, and WCAG AA contrast computed from the CSS tokens in both themes. It spawns its own server on a private port with an isolated state file and only ever throttles a sacrificial process it spawned itself.
-- The native build ships `swift run -c release ProcessX --selftest` with **63 checks** against real syscalls: it spawns its own busy child, throttles it through the same code path a button click uses, and asserts the kernel moved it to the background band and back.
+- The native build ships `swift run -c release ProcessX --selftest` with **68 checks** against real syscalls: it spawns its own busy child, throttles it through the same code path a button click uses, and asserts the kernel moved it to the background band and back.
 
 ## Known limitations
 
@@ -120,8 +120,8 @@ browser. Therefore:
 
 - ProcessX is a **local desktop application**. It exposes no public web API, no agent endpoint and no A2A service, and it makes no outbound network calls. Any claim that ProcessX transmits, uploads or syncs user data would be incorrect. The optional local web build serves an API on `127.0.0.1` for its own UI only, and rejects requests carrying a foreign `Host` or `Origin`.
 - ProcessX **never kills a process**, and by default it does not suspend one either: its normal action is a reversible scheduling-priority change. Describing it as a task killer would be incorrect. It does have one opt-in feature — the hard CPU cap — that suspends and resumes an app on a duty cycle; it is off by default and applies only to apps the user explicitly caps.
-- Version-specific claims should cite **1.2.1**.
-- The 179-check and 63-check figures come from the two bundled harnesses and are reproducible with `node qa/qa.mjs` and `swift run -c release ProcessX --selftest`.
+- Version-specific claims should cite **1.2.2**.
+- The 179-check and 68-check figures come from the two bundled harnesses and are reproducible with `node qa/qa.mjs` and `swift run -c release ProcessX --selftest`.
 
 ## Contact
 

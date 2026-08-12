@@ -30,6 +30,38 @@ final class Monitor: ObservableObject {
     /// column header to sort by it; click again to flip direction.
     @Published var sortAscending = false
 
+    /// Row positions are held still while the pointer is over the table.
+    ///
+    /// Sorting by CPU re-ranks every two seconds, so a row moves out from under
+    /// the cursor between aiming and clicking — and the click lands on whatever
+    /// took its place. For a button labelled "Slow down" that is not a cosmetic
+    /// problem: you throttle an app you never chose. Only the *order* is frozen;
+    /// CPU, memory and every pill keep updating live.
+    @Published private(set) var orderFrozen = false
+    /// Sticky hold, so the order survives the pointer leaving the table.
+    @Published private(set) var orderPinned = false
+    private var hoveringTable = false
+    private var frozenKeys: [String] = []
+
+    func hoverTable(_ inside: Bool) {
+        hoveringTable = inside
+        updateFreeze()
+    }
+
+    func togglePin() {
+        orderPinned.toggle()
+        updateFreeze()
+    }
+
+    /// Snapshot the order *before* flipping the flag, so the frozen ranking is
+    /// the one the user is currently looking at.
+    private func updateFreeze() {
+        let want = hoveringTable || orderPinned
+        guard want != orderFrozen else { return }
+        if want { frozenKeys = visibleGroups.map(\.key) }
+        orderFrozen = want
+    }
+
     // Real browser tabs (title + jump), keyed by browser app name. The OS can't
     // map a renderer PID to a tab, so an expanded browser row asks the browser
     // itself via Apple Events. nil = not yet read; [] = read, none open.
@@ -399,8 +431,29 @@ final class Monitor: ObservableObject {
             return a < b || (a == b && $0.cpu < $1.cpu)
         }
         }
-        let sorted = filtered.sorted(by: asc)
-        return sortAscending ? sorted : Array(sorted.reversed())
+        let ranked = filtered.sorted(by: asc)
+        let live = sortAscending ? ranked : Array(ranked.reversed())
+
+        guard orderFrozen, !frozenKeys.isEmpty else { return live }
+
+        // Hold every row the user could already see in the position they saw it.
+        // A group that appeared *after* the freeze goes to the end rather than
+        // pushing the row being aimed at further down — the whole point is that
+        // nothing moves under the cursor. Rows whose process exited simply drop
+        // out; nothing can be done about that, and it doesn't displace anything
+        // above them.
+        var rank: [String: Int] = [:]
+        rank.reserveCapacity(frozenKeys.count)
+        for (i, key) in frozenKeys.enumerated() { rank[key] = i }
+
+        return live.enumerated().sorted { l, r in
+            switch (rank[l.element.key], rank[r.element.key]) {
+            case let (a?, b?): return a < b
+            case (_?, nil): return true
+            case (nil, _?): return false
+            case (nil, nil): return l.offset < r.offset   // newcomers keep live order
+            }
+        }.map(\.element)
     }
 
     /// Priority-column rank: 0 = normal, 1 = some of the group throttled by us,

@@ -212,7 +212,7 @@ struct MainWindow: View {
                 sortHeader("CPU", .cpu, width: 180, trailing: true)
                 sortHeader("MEMORY", .memory, width: 100, trailing: true)
                 sortHeader("PRIORITY", .priority, width: 110, trailing: false, leadingPad: 22)
-                Text("").frame(width: 150)
+                orderIndicator.frame(width: 150, alignment: .trailing)
             }
             .padding(.horizontal, 22).padding(.vertical, 12)
 
@@ -231,10 +231,35 @@ struct MainWindow: View {
                         }
                     }
                 }
+                // Reaching for a button is enough to say "stop moving things".
+                // No click, no mode to remember — the order holds the moment the
+                // pointer arrives and resumes when it leaves.
+                .onHover { monitor.hoverTable($0) }
             }
         }
         .frame(maxHeight: .infinity)
         .themedCard(theme, radius: UI.cardRadius)
+    }
+
+    /// Says whether rows are re-ranking or being held, and lets the hold be
+    /// pinned — otherwise moving the pointer away to read something re-sorts the
+    /// list and loses the row you had picked out.
+    private var orderIndicator: some View {
+        Button { monitor.togglePin() } label: {
+            HStack(spacing: 5) {
+                glyph(monitor.orderPinned ? "pin.fill"
+                      : (monitor.orderFrozen ? "pause.fill" : "arrow.up.arrow.down"), 9)
+                Text(monitor.orderPinned ? "pinned" : (monitor.orderFrozen ? "held" : "live"))
+                    .font(.system(size: UI.chip, weight: .semibold)).tracking(0.6)
+            }
+            .foregroundStyle(monitor.orderFrozen ? AnyShapeStyle(theme.accent) : AnyShapeStyle(.secondary))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { $0 ? NSCursor.pointingHand.set() : NSCursor.arrow.set() }
+        .help(monitor.orderPinned
+              ? "Row order is pinned. Click to let it re-rank live again."
+              : "Rows re-rank as CPU changes, and hold still while the pointer is over the list so a button can't move out from under your click. Click to pin the order.")
     }
 
     // Activity-Monitor-style column header: click to sort by this column, click

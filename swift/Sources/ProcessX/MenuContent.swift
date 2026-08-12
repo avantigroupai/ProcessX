@@ -127,6 +127,9 @@ struct MenuContent: View {
             }
         }
         .frame(height: ms(210))
+        // Same hold as the main window: the popover is smaller and the buttons
+        // are closer together, so a row shifting under the cursor matters more.
+        .onHover { monitor.hoverTable($0) }
     }
 
     private var footer: some View {

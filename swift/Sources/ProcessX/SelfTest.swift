@@ -475,6 +475,46 @@ enum SelfTest {
         }
         try? FileManager.default.removeItem(at: tmpCaps)   // run() ends in exit(); no defer
 
+        print("\n[order freeze] rows must not move out from under a click")
+        MainActor.assumeIsolated {
+            let m = Monitor()
+            m.sort = .cpu
+            m.tick()
+            Thread.sleep(forTimeInterval: 0.6)
+            m.tick()
+
+            let before = m.visibleGroups.map(\.key)
+            check("table has rows to hold", before.count > 3, "\(before.count) groups")
+
+            m.hoverTable(true)
+            check("pointer over the table holds the order", m.orderFrozen)
+
+            // Three ticks is six seconds of real CPU movement — under load the
+            // live ranking churns heavily across that window.
+            for _ in 0..<3 { Thread.sleep(forTimeInterval: 0.5); m.tick() }
+            let during = m.visibleGroups.map(\.key)
+
+            // Rows can disappear (a process exits) but the survivors must keep
+            // their relative order: that is exactly what makes a button stay put.
+            let survivors = during.filter { before.contains($0) }
+            let expected = before.filter { during.contains($0) }
+            check("held rows keep their relative order across ticks", survivors == expected,
+                  survivors == expected ? "\(survivors.count) rows steady"
+                                        : "order changed while held")
+            check("newly appeared rows are appended, not inserted",
+                  during.prefix(expected.count).elementsEqual(expected))
+
+            m.hoverTable(false)
+            check("order resumes when the pointer leaves", !m.orderFrozen)
+
+            m.togglePin()
+            check("pin holds the order with no pointer", m.orderFrozen && m.orderPinned)
+            m.hoverTable(true); m.hoverTable(false)
+            check("pinned order survives the pointer leaving", m.orderFrozen)
+            m.togglePin()
+            check("unpinning releases it", !m.orderFrozen)
+        }
+
         print("\n[signing] the hardened runtime and its entitlements must ship together")
         if let (hardened, entitlements) = ownSigningInfo() {
             if hardened {
