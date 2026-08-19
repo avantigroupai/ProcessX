@@ -22,6 +22,10 @@ struct CapRecord: Codable, Equatable, Identifiable {
     /// Last measured CPU for the whole capped set, so the UI can show whether the
     /// cap is actually holding.
     var achieved: Double = 0
+    /// Held but not enforcing, because the app is currently in the foreground.
+    /// You should never be looking at a window that is suspended most of the
+    /// time — but that is a reason to stop *enforcing* a cap, not to forget it.
+    var paused: Bool = false
     var id: String { key }
 }
 
@@ -174,6 +178,7 @@ private final class LiveCap {
     var lastTicks: UInt64 = 0
     var lastStamp: CFAbsoluteTime = 0
     var achieved: Double = 0
+    var paused = false
     let at: Date
     /// Bumped to invalidate scheduled continuations when a cap is replaced.
     var gen: Int
@@ -184,7 +189,8 @@ private final class LiveCap {
     }
 
     var record: CapRecord {
-        CapRecord(key: key, name: name, percent: percent, targets: targets, at: at, achieved: achieved)
+        CapRecord(key: key, name: name, percent: percent, targets: targets, at: at,
+                  achieved: achieved, paused: paused)
     }
 }
 
@@ -248,6 +254,28 @@ final class Capper: @unchecked Sendable {
 
     func clear(_ key: String) {
         queue.async { self.clearLocked(key) }
+    }
+
+    /// Stop enforcing a cap without forgetting it, and resume enforcing later.
+    ///
+    /// This is what focus does. Deleting the cap instead — which is what the
+    /// first version did — throws away an explicit instruction the moment the
+    /// user glances at the app they capped, and there is no way to tell that
+    /// from the app having decided to stop on its own.
+    func setPaused(_ key: String, _ paused: Bool) {
+        queue.async {
+            guard let c = self.caps[key], c.paused != paused else { return }
+            c.paused = paused
+            if paused {
+                for t in c.targets { _ = kill(t.pid, SIGCONT) }
+                c.running = true
+            }
+            // Either way the controller restarts from a clean slate: the CPU
+            // measured across a pause boundary describes two different regimes.
+            c.lastStamp = 0
+            c.runFraction = 1
+            Audit.log("CAP      key=\(key) \(paused ? "paused (app in front)" : "resumed")")
+        }
     }
 
     func clearAll() {
