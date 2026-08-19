@@ -117,6 +117,77 @@ enum SelfTest {
         check("CLI in frontmost terminal counts as FRONT (never tamed)", model.isFront(cliKey))
         check("background ffmpeg does NOT count as front (tamable)", !model.isFront(ffKey))
 
+        print("\n[browser procs] renderers vs support, and the visible/background split")
+        let chromePrefix = "/Applications/Google Chrome.app/Contents"
+        let helpers = "\(chromePrefix)/Frameworks/Google Chrome Framework.framework/Versions/151/Helpers"
+        let chromeProcs = [
+            ProcSample(pid: 100, ppid: 1, uid: 501, name: "Google Chrome",
+                       path: "\(chromePrefix)/MacOS/Google Chrome",
+                       rss: 400_000_000, priority: 47, cpuPct: 3),
+            // On screen: the browser leaves it at normal priority.
+            ProcSample(pid: 101, ppid: 100, uid: 501, name: "Google Chrome Helper (Renderer)",
+                       path: "\(helpers)/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)",
+                       rss: 300_000_000, priority: 47, cpuPct: 62),
+            // Hidden: parked in the background band by Chrome itself, not by us.
+            ProcSample(pid: 102, ppid: 100, uid: 501, name: "Google Chrome Helper (Renderer)",
+                       path: "\(helpers)/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)",
+                       rss: 90_000_000, priority: Sampler.bgBand, cpuPct: 0.2),
+            // GPU/utility children are unlabelled "Helper" in current Chrome.
+            ProcSample(pid: 103, ppid: 100, uid: 501, name: "Google Chrome Helper",
+                       path: "\(helpers)/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper",
+                       rss: 120_000_000, priority: 47, cpuPct: 5),
+        ]
+        let chromeModel = Grouping.build(procs: chromeProcs, frontPID: 100, myUID: 501)
+        if let chrome = chromeModel.group(for: "a:Google Chrome") {
+            let b = BrowserProcs.breakdown(for: chrome, model: chromeModel)
+            check("renderers separated from support", b.renderers.count == 2 && b.supportCount == 2,
+                  "\(b.renderers.count) renderers, \(b.supportCount) support")
+            check("renderers sorted by CPU", b.renderers.first?.pid == 101)
+            check("the browser process is not counted as a renderer",
+                  !b.renderers.contains { $0.pid == 100 })
+            check("visible vs background split matches the kernel band",
+                  b.visibleCount == 1 && b.backgroundCount == 1,
+                  "\(b.visibleCount) visible, \(b.backgroundCount) background")
+            // The numbers next to the section header must add up to the group's,
+            // or the breakdown silently loses processes.
+            check("renderer + support CPU reconciles with the group",
+                  abs((b.rendererCPU + b.supportCPU) - chrome.cpu) < 0.001,
+                  String(format: "%.2f vs %.2f", b.rendererCPU + b.supportCPU, chrome.cpu))
+            check("renderer + support memory reconciles with the group",
+                  b.rendererMem + b.supportMem == chrome.mem)
+            check("Chromium's renderers are not flagged as shared", !b.shared)
+        } else {
+            check("Chrome group built", false, "no a:Google Chrome group")
+        }
+
+        // Safari's page processes are reparented to launchd, so they are never in
+        // Safari's own group — the breakdown has to reach across to the WebKit
+        // daemon group, and say that what it found isn't Safari's alone.
+        let safariProcs = [
+            ProcSample(pid: 200, ppid: 1, uid: 501, name: "Safari",
+                       path: "/Applications/Safari.app/Contents/MacOS/Safari",
+                       rss: 500_000_000, priority: 47, cpuPct: 4),
+            ProcSample(pid: 201, ppid: 1, uid: 501, name: "com.apple.WebKit.WebContent",
+                       path: "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent",
+                       rss: 250_000_000, priority: 47, cpuPct: 30),
+            ProcSample(pid: 202, ppid: 1, uid: 501, name: "com.apple.WebKit.WebContent",
+                       path: "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent",
+                       rss: 80_000_000, priority: Sampler.bgBand, cpuPct: 0.1),
+        ]
+        let safariModel = Grouping.build(procs: safariProcs, frontPID: 200, myUID: 501)
+        check("WebKit page processes land outside Safari's group",
+              safariModel.byPID[201]?.groupKey == BrowserProcs.webKitContentKey,
+              safariModel.byPID[201]?.groupKey ?? "nil")
+        if let safari = safariModel.group(for: "a:Safari") {
+            let b = BrowserProcs.breakdown(for: safari, model: safariModel)
+            check("Safari's page processes are found across the group boundary",
+                  b.renderers.count == 2, "\(b.renderers.count) found")
+            check("and are flagged as shared with other WebKit apps", b.shared)
+            check("Safari's visible/background split still reads", b.visibleCount == 1)
+        } else {
+            check("Safari group built", false, "no a:Safari group")
+        }
+
         print("\n[sampler] libproc — no subprocesses")
         let sampler = Sampler()
         _ = sampler.sample()                       // establish CPU baseline

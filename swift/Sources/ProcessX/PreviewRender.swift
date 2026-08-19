@@ -7,7 +7,8 @@ import SwiftUI
 /// Materials/vibrancy don't rasterise here, but layout, text and structure do.
 @MainActor
 enum PreviewRender {
-    static func run(to path: String, dark: Bool, rowsOnly: Bool = false, window: Bool = false) {
+    static func run(to path: String, dark: Bool, rowsOnly: Bool = false, window: Bool = false,
+                    expandBrowser: Bool = false) {
         let monitor = Monitor()
         monitor.tick()                          // establish the CPU baseline
         Thread.sleep(forTimeInterval: 1.2)
@@ -16,13 +17,29 @@ enum PreviewRender {
         // Give the sparklines a couple of points of history to draw.
         for _ in 0..<3 { Thread.sleep(forTimeInterval: 0.35); monitor.tick() }
 
+        // The tab list arrives over Apple Events, and nothing in a headless render
+        // triggers the fetch the way expanding a row does. Ask first, then wait —
+        // otherwise the browser section renders as "Reading tabs…".
+        let browser = monitor.visibleGroups.first { monitor.isBrowser($0) }
+        if expandBrowser, let browser {
+            monitor.refreshTabs(browser.name)
+            for _ in 0..<20 where monitor.browserTabs[browser.name] == nil
+                && !monitor.tabsNotPermitted.contains(browser.name) {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            }
+        }
+
         let inner: AnyView
         if window {
             inner = AnyView(MainWindow(monitor: monitor).frame(width: 1180, height: 800))
         } else if rowsOnly {
             inner = AnyView(VStack(spacing: 0) {
-                ForEach(monitor.visibleGroups.prefix(10)) { g in
-                    BigGroupRow(group: g, monitor: monitor, accent: monitor.theme.accent)
+                // With --expand, lead with the browser: it's the row whose
+                // expansion is worth looking at.
+                ForEach(expandBrowser ? [browser].compactMap { $0 }
+                                      : Array(monitor.visibleGroups.prefix(10))) { g in
+                    BigGroupRow(group: g, monitor: monitor, accent: monitor.theme.accent,
+                                startExpanded: expandBrowser)
                     Divider().opacity(0.4)
                 }
             }.frame(width: 1180))

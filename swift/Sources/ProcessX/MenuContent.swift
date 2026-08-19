@@ -334,7 +334,7 @@ private struct ChildRow: View {
     var body: some View {
         HStack(spacing: ms(7)) {
             Text(Grouping.label(proc)).font(.system(size: ms(11))).foregroundStyle(.secondary).lineLimit(1)
-            Text("\(proc.pid)").font(.system(size: ms(9))).foregroundStyle(.tertiary).monospacedDigit()
+            Text(verbatim: "\(proc.pid)").font(.system(size: ms(9))).foregroundStyle(.tertiary).monospacedDigit()
             if monitor.isThrottledByUs(proc.pid) {
                 Chip(text: monitor.origin(proc.pid) == .auto ? "auto-slowed" : "slowed")
             } else if proc.priority <= Sampler.bgBand {

@@ -20,7 +20,8 @@ struct ProcessXApp: App {
             MainActor.assumeIsolated {
                 PreviewRender.run(to: args[i + 1], dark: args.contains("--dark"),
                                   rowsOnly: args.contains("--rows"),
-                                  window: args.contains("--window"))
+                                  window: args.contains("--window"),
+                                  expandBrowser: args.contains("--expand"))
             }
         }
     }

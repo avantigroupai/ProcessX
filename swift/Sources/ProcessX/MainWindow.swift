@@ -440,7 +440,14 @@ struct BigGroupRow: View {
     var group: ProcGroup
     @ObservedObject var monitor: Monitor
     var accent: Color
-    @State private var expanded = false
+    /// Opens the row on first draw. Only `--render` sets this: ImageRenderer never
+    /// delivers the click that would otherwise expand a row, so without it the
+    /// headless preview can only ever show collapsed rows.
+    var startExpanded = false
+    /// nil until the disclosure is actually clicked — which is what lets
+    /// `startExpanded` supply the initial value without a custom init.
+    @State private var toggledOpen: Bool?
+    private var expanded: Bool { toggledOpen ?? startExpanded }
     @State private var hovering = false
     @State private var confirmBulk = false
     @State private var showInfo = false
@@ -465,7 +472,7 @@ struct BigGroupRow: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 HStack(spacing: 11) {
-                    Button { expanded.toggle() } label: {
+                    Button { toggledOpen = !expanded } label: {
                         glyph("chevron.right", 11)
                             .rotationEffect(.degrees(expanded ? 90 : 0))
                             .foregroundStyle(.secondary).frame(width: 14)
@@ -509,7 +516,7 @@ struct BigGroupRow: View {
 
             if expanded {
                 if monitor.isBrowser(group) {
-                    browserTabList
+                    browserDetail
                 } else {
                     ForEach(group.procs.sorted { $0.cpuPct > $1.cpuPct }.prefix(15), id: \.pid) { p in
                         BigChildRow(proc: p, monitor: monitor, accent: accent)
@@ -637,6 +644,14 @@ struct BigGroupRow: View {
         if monitor.capAcknowledged { monitor.setCap(group, percent: pct) } else { pendingCap = pct }
     }
 
+    // A browser expands into two halves, because neither half is the whole
+    // answer: the tabs have names but no numbers, the renderers have numbers but
+    // no names, and macOS won't join them.
+    @ViewBuilder private var browserDetail: some View {
+        browserTabList
+        browserRendererList
+    }
+
     // Real tabs for a scriptable browser: names you recognise, double-click to
     // jump. (macOS won't map a renderer PID to a tab, so we ask the browser.)
     @ViewBuilder private var browserTabList: some View {
@@ -646,6 +661,7 @@ struct BigGroupRow: View {
             if tabs.isEmpty {
                 TabsInfoRow(text: "No open tabs in \(group.name).")
             } else {
+                SectionRow(title: "Tabs", count: tabs.count, accent: accent)
                 ForEach(tabs) { tab in
                     TabRow(tab: tab, appName: group.name, monitor: monitor, accent: accent)
                 }
@@ -653,6 +669,162 @@ struct BigGroupRow: View {
         } else {
             TabsInfoRow(text: "Reading tabs…")
         }
+    }
+
+    // The measurable half. Per-renderer CPU and memory are real; the mapping to
+    // a tab is the part that doesn't exist, so the caption says so outright
+    // rather than letting the adjacency imply a pairing.
+    @ViewBuilder private var browserRendererList: some View {
+        let b = BrowserProcs.breakdown(for: group, model: monitor.model)
+        if !b.isEmpty {
+            SectionRow(title: b.shared ? "Web page processes" : "Renderer processes",
+                       count: b.renderers.count, accent: accent,
+                       cpu: b.rendererCPU, mem: b.rendererMem)
+
+            ForEach(b.renderers.prefix(Self.rendererLimit), id: \.pid) { p in
+                RendererRow(proc: p, monitor: monitor, accent: accent)
+            }
+            if b.renderers.count > Self.rendererLimit {
+                let rest = b.renderers.dropFirst(Self.rendererLimit)
+                RollupRow(text: "+\(rest.count) quieter renderers",
+                          cpu: rest.reduce(0) { $0 + $1.cpuPct },
+                          mem: rest.reduce(0) { $0 + $1.rss })
+            }
+            if b.supportCount > 0 {
+                RollupRow(text: "Support processes (GPU, networking, extensions) ×\(b.supportCount)",
+                          cpu: b.supportCPU, mem: b.supportMem)
+            }
+            TabsInfoRow(text: rendererNote(b), wraps: true)
+        }
+    }
+
+    private static let rendererLimit = 8
+
+    private func rendererNote(_ b: BrowserProcs.Breakdown) -> String {
+        if b.shared {
+            return "macOS reparents WebKit page processes away from Safari and shares them "
+                 + "with every app that shows web content, so these aren't all Safari's — "
+                 + "and none of them can be traced back to a named tab."
+        }
+        return "\(b.visibleCount) of \(b.renderers.count) renderers serve tabs that are on "
+             + "screen; the browser parks the rest in the background band. macOS can't say "
+             + "which tab a renderer belongs to, and \(group.name) shares one renderer "
+             + "across same-site tabs — so a hot renderer narrows it down, it doesn't name it."
+    }
+}
+
+/// Header inside an expanded row: names the half you're looking at, and totals
+/// it in the same columns as the rows beneath so the numbers line up.
+private struct SectionRow: View {
+    let title: String
+    let count: Int
+    var accent: Color
+    var cpu: Double? = nil
+    var mem: UInt64? = nil
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text(title.uppercased())
+                    .font(.system(size: UI.chip, weight: .semibold)).foregroundStyle(.secondary)
+                    .tracking(0.6)
+                Text("\(count)").font(.system(size: UI.chip)).monospacedDigit().foregroundStyle(.tertiary)
+            }
+            .padding(.leading, 60).frame(maxWidth: .infinity, alignment: .leading)
+
+            Group {
+                if let cpu {
+                    Text(String(format: "%.1f%%", cpu))
+                        .font(.system(size: UI.chip)).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 180, alignment: .trailing)
+            Group {
+                if let mem {
+                    Text(fmtBytes(mem))
+                        .font(.system(size: UI.chip)).monospacedDigit().foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 100, alignment: .trailing)
+            Spacer().frame(width: 282)
+        }
+        .padding(.horizontal, 22).frame(height: 26)
+        .background(Color.primary.opacity(0.04))
+    }
+}
+
+/// One renderer. No name to give it — the pill and the numbers are everything
+/// we actually know.
+private struct RendererRow: View {
+    var proc: ProcSample
+    @ObservedObject var monitor: Monitor
+    var accent: Color
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 9) {
+                glyph("squares.leading.rectangle", UI.caption).foregroundStyle(.secondary).frame(width: 16)
+                Text("Renderer").font(.system(size: UI.caption)).foregroundStyle(.secondary)
+                Text(verbatim: "\(proc.pid)").font(.system(size: UI.chip)).foregroundStyle(.tertiary).monospacedDigit()
+                if monitor.isThrottledByUs(proc.pid) {
+                    Pill(text: monitor.origin(proc.pid) == .auto ? "auto-slowed" : "slowed",
+                         tone: .accent, accent: accent)
+                } else if BrowserProcs.isVisible(proc) {
+                    Pill(text: "visible tab", tone: .green, accent: accent)
+                } else {
+                    Pill(text: "background tab", tone: .neutral, accent: accent)
+                }
+            }
+            .padding(.leading, 60).frame(maxWidth: .infinity, alignment: .leading)
+
+            CPUCell(pct: proc.cpuPct, accent: accent, small: true).frame(width: 180, alignment: .trailing)
+            Text(fmtBytes(proc.rss)).font(.system(size: UI.caption)).monospacedDigit()
+                .foregroundStyle(.secondary).frame(width: 100, alignment: .trailing)
+            Spacer().frame(width: 132)
+            Group {
+                if monitor.isThrottledByUs(proc.pid) {
+                    Button("Restore") { monitor.restore(pids: [proc.pid]) }
+                        .buttonStyle(.glass).font(.system(size: UI.chip))
+                } else if monitor.isProtected(proc) {
+                    glyph("lock", UI.chip).foregroundStyle(.tertiary)
+                } else {
+                    Button("Slow") { monitor.throttle(pids: [proc.pid], origin: .manual, manual: true) }
+                        .buttonStyle(.glass).font(.system(size: UI.chip))
+                        .opacity(hovering ? 1 : 0.55)
+                }
+            }
+            .frame(width: 150, alignment: .trailing)
+        }
+        .padding(.horizontal, 22).frame(height: 36)
+        .background(hovering ? Color.primary.opacity(0.05) : Color.primary.opacity(0.02))
+        .onHover { hovering = $0 }
+        .help(BrowserProcs.isVisible(proc)
+              ? "Serving a tab that's currently on screen. PID \(proc.pid)"
+              : "Serving hidden tabs — the browser has parked it in the background band. PID \(proc.pid)")
+    }
+}
+
+/// The tail of a long list, summed rather than listed.
+private struct RollupRow: View {
+    let text: String
+    let cpu: Double
+    let mem: UInt64
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(text).font(.system(size: UI.caption)).foregroundStyle(.tertiary).lineLimit(1)
+                .padding(.leading, 85).frame(maxWidth: .infinity, alignment: .leading)
+            Text(String(format: "%.1f%%", cpu))
+                .font(.system(size: UI.caption)).monospacedDigit().foregroundStyle(.tertiary)
+                .frame(width: 180, alignment: .trailing)
+            Text(fmtBytes(mem))
+                .font(.system(size: UI.caption)).monospacedDigit().foregroundStyle(.tertiary)
+                .frame(width: 100, alignment: .trailing)
+            Spacer().frame(width: 282)
+        }
+        .padding(.horizontal, 22).frame(height: 32)
+        .background(Color.primary.opacity(0.02))
     }
 }
 
@@ -692,10 +864,18 @@ private struct TabRow: View {
 
 private struct TabsInfoRow: View {
     let text: String
+    /// The renderer caption is a paragraph, not a status line — it has to wrap
+    /// rather than truncate, because the caveat is the point of it.
+    var wraps = false
     var body: some View {
-        Text(text).font(.system(size: UI.caption)).foregroundStyle(.tertiary)
-            .padding(.leading, 60).frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 34).background(Color.primary.opacity(0.02))
+        Text(text)
+            .font(.system(size: wraps ? UI.chip : UI.caption)).foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 60).padding(.trailing, 120)
+            .padding(.vertical, wraps ? 9 : 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: 34)
+            .background(Color.primary.opacity(0.02))
     }
 }
 
@@ -767,7 +947,7 @@ private struct BigChildRow: View {
         HStack(spacing: 0) {
             HStack(spacing: 9) {
                 Text(Grouping.label(proc)).font(.system(size: UI.caption)).foregroundStyle(.secondary).lineLimit(1)
-                Text("\(proc.pid)").font(.system(size: UI.chip)).foregroundStyle(.tertiary).monospacedDigit()
+                Text(verbatim: "\(proc.pid)").font(.system(size: UI.chip)).foregroundStyle(.tertiary).monospacedDigit()
                 if monitor.isThrottledByUs(proc.pid) {
                     Pill(text: monitor.origin(proc.pid) == .auto ? "auto-slowed" : "slowed", tone: .accent, accent: accent)
                 } else if proc.priority <= Sampler.bgBand {
