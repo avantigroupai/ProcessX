@@ -23,9 +23,16 @@ enum PreviewRender {
         let browser = monitor.visibleGroups.first { monitor.isBrowser($0) }
         if expandBrowser, let browser {
             monitor.refreshTabs(browser.name)
-            for _ in 0..<20 where monitor.browserTabs[browser.name] == nil
+            // Enumerating tabs is one synchronous Apple Event across every window,
+            // so it scales with the browser, not with the machine: a Chrome with a
+            // hundred-odd tabs takes well over the five seconds this first waited,
+            // and the render silently came out saying "Reading tabs…".
+            for _ in 0..<120 where monitor.browserTabs[browser.name] == nil
                 && !monitor.tabsNotPermitted.contains(browser.name) {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+            }
+            if monitor.browserTabs[browser.name] == nil {
+                print("note: \(browser.name) tabs did not arrive in 30s — rendering without them")
             }
         }
 
