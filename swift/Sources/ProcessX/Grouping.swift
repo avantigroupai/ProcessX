@@ -59,10 +59,20 @@ enum Grouping {
     }
 
     /// "/Applications/Foo.app/Contents/MacOS/Foo" -> "Foo"
+    ///
+    /// Scanned by hand rather than by regex. `build()` calls this once per
+    /// ancestor per process — on a 900-process machine that was several thousand
+    /// `NSRegularExpression` evaluations every two seconds, and it showed up in a
+    /// profile as ICU regex matching inside the sampling tick. A literal scan for
+    /// ".app/" does the same job with no allocation and no matcher.
     static func appName(of path: String) -> String? {
-        guard let r = path.range(of: #"/([^/]+)\.app/"#, options: .regularExpression) else { return nil }
-        let seg = String(path[r]).dropFirst().dropLast()          // "Foo.app"
-        return String(seg.dropLast(4))                            // "Foo"
+        // Leftmost ".app/", matching what the regex found. Everything between the
+        // slash before it and the extension is the bundle name.
+        guard let ext = path.range(of: ".app/") else { return nil }
+        let before = path[path.startIndex..<ext.lowerBound]
+        guard let slash = before.lastIndex(of: "/") else { return nil }
+        let name = before[before.index(after: slash)...]
+        return name.isEmpty ? nil : String(name)
     }
 
     static func baseName(_ p: String) -> String {
@@ -80,6 +90,7 @@ enum Grouping {
 
         var groups: [String: ProcGroup] = [:]
         var order: [String] = []
+        var appNameCache: [String: String?] = [:]
 
         func assign(_ p: ProcSample, key: String, name: String, kind: GroupKind, parentKey: String?) {
             if groups[key] == nil {
@@ -109,13 +120,23 @@ enum Grouping {
 
             // The app bundle closest to launchd owns the tree:
             // "Chrome Helper (Renderer)" belongs to "Google Chrome".
+            // Siblings share ancestors, so the same paths come round again and
+            // again within one build — memoise rather than re-parse.
             var appIdx: Int?
-            for i in stride(from: chain.count - 1, through: 0, by: -1) where appName(of: chain[i].path) != nil {
-                appIdx = i
-                break
+            var appAtIdx: String?
+            for i in stride(from: chain.count - 1, through: 0, by: -1) {
+                let path = chain[i].path
+                let name: String?
+                if let cached = appNameCache[path] { name = cached }
+                else { name = appName(of: path); appNameCache[path] = name }
+                if let name {
+                    appIdx = i
+                    appAtIdx = name
+                    break
+                }
             }
 
-            if let ai = appIdx, let app = appName(of: chain[ai].path) {
+            if let ai = appIdx, let app = appAtIdx {
                 if Policy.terminals.contains(app) {
                     // First non-shell process below the terminal is the session root.
                     var sessionIdx: Int?
