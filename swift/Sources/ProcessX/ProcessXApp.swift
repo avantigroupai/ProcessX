@@ -16,6 +16,22 @@ struct ProcessXApp: App {
             CapGuardian.run(parent: parent, listPath: args[i + 2])
         }
         if args.contains("--selftest") { MainActor.assumeIsolated { SelfTest.run() } }
+        // Headless cost breakdown of a sampling tick — no window, no view layer,
+        // so it measures the sampler and nothing else.
+        if let i = args.firstIndex(of: "--bench") {
+            let n = (i + 1 < args.count ? Int(args[i + 1]) : nil) ?? 20
+            Bench.run(iterations: n)
+        }
+        if let i = args.firstIndex(of: "--bench-view") {
+            let n = (i + 1 < args.count ? Int(args[i + 1]) : nil) ?? 20
+            MainActor.assumeIsolated { Bench.view(iterations: n) }
+        }
+        // The same Monitor the window drives, running for real with no view layer —
+        // the control against which a window-open measurement is read.
+        if let i = args.firstIndex(of: "--bench-live") {
+            let n = (i + 1 < args.count ? Double(args[i + 1]) : nil) ?? 20
+            MainActor.assumeIsolated { Bench.live(seconds: n) }
+        }
         if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
             MainActor.assumeIsolated {
                 PreviewRender.run(to: args[i + 1], dark: args.contains("--dark"),
