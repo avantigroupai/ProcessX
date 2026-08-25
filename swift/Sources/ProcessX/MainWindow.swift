@@ -815,9 +815,14 @@ private struct RendererRow: View {
                 } else if isExtension {
                     Pill(text: "extension", tone: .neutral, accent: accent)
                 } else if BrowserProcs.isVisible(proc) {
-                    Pill(text: "visible tab", tone: .green, accent: accent)
+                    // Not "visible tab": the caption below this list spells out
+                    // that the band means not-parked, and the pill is the more
+                    // prominent of the two — it cannot assert what the caption
+                    // spends a sentence retracting. A renderer above the band may
+                    // be serving a tab that left the screen minutes ago.
+                    Pill(text: "not parked", tone: .green, accent: accent)
                 } else {
-                    Pill(text: "background tab", tone: .neutral, accent: accent)
+                    Pill(text: "parked", tone: .neutral, accent: accent)
                 }
                 if BrowserProcs.isVisible(proc), !isExtension { nameLabel }
             }
