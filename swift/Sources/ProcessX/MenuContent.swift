@@ -36,6 +36,11 @@ struct MenuContent: View {
             footer
         }
         .frame(width: ms(460))
+        // The popover is built only while it is open, so its lifetime *is* the
+        // "someone is looking" signal — the monitor keeps publishing for as long
+        // as this exists, even with the main window hidden behind everything.
+        .onAppear { monitor.setMenuOpen(true) }
+        .onDisappear { monitor.setMenuOpen(false) }
     }
 
     private var header: some View {

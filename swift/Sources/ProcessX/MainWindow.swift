@@ -45,6 +45,10 @@ struct MainWindow: View {
                 .padding(.bottom, UI.gutter)
         }
         .background(ThemeBackground(theme: theme))
+        // Tell the monitor when this window is covered, minimised or closed, so
+        // it can stop publishing to a window nobody can see.
+        .background(WindowVisibilityReporter { monitor.setWindowVisible($0) })
+        .onDisappear { monitor.setWindowVisible(false) }
         .tint(theme.accent)
         .preferredColorScheme(theme.forcedScheme)
         .frame(minWidth: 980, minHeight: 660)

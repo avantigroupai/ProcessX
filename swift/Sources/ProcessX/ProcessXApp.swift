@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// Observes the title object rather than the whole monitor. Reading
+/// `monitor.menuBarTitle` here would subscribe this label — and so the App's
+/// whole body — to every change the monitor publishes, which is exactly the
+/// coupling the hidden-window gate exists to break.
+private struct MenuBarLabel: View {
+    @ObservedObject var title: Monitor.MenuBarTitle
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "waveform.path.ecg").symbolRenderingMode(.monochrome)
+            Text(title.text).monospacedDigit()
+        }
+    }
+}
+
 @main
 struct ProcessXApp: App {
     @StateObject private var monitor = Monitor()
@@ -59,10 +73,7 @@ struct ProcessXApp: App {
         MenuBarExtra {
             MenuContent(monitor: monitor)
         } label: {
-            HStack(spacing: 3) {
-                Image(systemName: "waveform.path.ecg").symbolRenderingMode(.monochrome)
-                Text(monitor.menuBarTitle).monospacedDigit()
-            }
+            MenuBarLabel(title: monitor.menuBar)
         }
         .menuBarExtraStyle(.window)
     }

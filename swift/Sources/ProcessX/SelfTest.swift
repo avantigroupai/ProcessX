@@ -1,3 +1,4 @@
+import Combine
 import Darwin
 import Foundation
 import Security
@@ -787,6 +788,60 @@ enum SelfTest {
             } catch {
                 check("Monitor quit path", false, "\(error)")
             }
+        }
+
+        print("\n[hidden window] a tick nobody can see must not redraw a window")
+        MainActor.assumeIsolated {
+            let m = Monitor()
+            m.tick()
+            Thread.sleep(forTimeInterval: 0.6)
+            m.tick()
+
+            // objectWillChange is the thing that costs money: one emission means a
+            // full SwiftUI rebuild of the window, which profiling put at ~90% of
+            // this app's CPU. Counting it is the only assertion that actually
+            // tests the gate rather than its side effects.
+            var notified = 0
+            let sub = m.objectWillChange.sink { _ in notified += 1 }
+            defer { sub.cancel() }
+
+            check("starts visible", m.uiActive)
+            notified = 0
+            m.tick()
+            check("a visible tick redraws the window", notified > 0, "\(notified) notifications")
+
+            m.setWindowVisible(false)
+            check("hiding the window deactivates the UI", !m.uiActive)
+            notified = 0
+            Thread.sleep(forTimeInterval: 0.6)
+            m.tick()
+            check("a hidden tick redraws nothing", notified == 0, "\(notified) notifications")
+
+            // The whole point is that only the *drawing* stops. Everything the app
+            // decides with has to stay current, or auto-tame and the caps would be
+            // reasoning about a stale process table.
+            check("hidden tick still refreshes the process table",
+                  m.model.byPID[getpid()] != nil && m.model.groups.count > 3,
+                  "\(m.model.groups.count) groups")
+            check("hidden tick still updates the menu bar", m.menuBarTitle.hasSuffix("%"),
+                  m.menuBarTitle)
+
+            notified = 0
+            m.setWindowVisible(true)
+            check("showing the window republishes at once", notified > 0, "\(notified) notifications")
+            check("and the rows are there", m.visibleGroups.count > 3, "\(m.visibleGroups.count) rows")
+
+            // The menu popover is the other pair of eyes: open it and a hidden
+            // window must not silence the numbers it is showing.
+            m.setWindowVisible(false)
+            m.setMenuOpen(true)
+            check("an open menu keeps the UI active", m.uiActive)
+            notified = 0
+            Thread.sleep(forTimeInterval: 0.6)
+            m.tick()
+            check("a tick with the menu open redraws", notified > 0, "\(notified) notifications")
+            m.setMenuOpen(false)
+            check("closing the menu deactivates again", !m.uiActive)
         }
 
         print("\n[order freeze] rows must not move out from under a click")

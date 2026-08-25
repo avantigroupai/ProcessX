@@ -11,20 +11,34 @@ struct AppliedChange: Equatable {
 
 @MainActor
 final class Monitor: ObservableObject {
-    @Published private(set) var model = Model()
+    /// Deliberately **not** `@Published`, along with `throttled`, `caps` and the
+    /// two histories below.
+    ///
+    /// `Monitor` is a plain `ObservableObject`, so any `@Published` assignment
+    /// invalidates the window — there is no way to publish to the menu bar
+    /// without also redrawing a window nobody may be looking at. These five are
+    /// read by the app's own logic (auto-tame, cap reconciliation, the identity
+    /// guard on restore), so they must stay fresh every tick regardless. Keeping
+    /// them unpublished is what lets `tick` go quiet while the window is hidden;
+    /// the properties that only the window reads are assigned below the
+    /// `uiActive` gate, and re-reading these is part of that redraw.
+    private(set) var model = Model()
     @Published private(set) var totalCPU: Double = 0      // % of the whole machine
     @Published private(set) var gpu: Int?
     @Published private(set) var memory = MemoryStats()
-    @Published private(set) var throttled: [ThrottleRecord] = []
+    private(set) var throttled: [ThrottleRecord] = []
     /// Groups currently held under a hard CPU cap (suspend/resume duty cycle).
-    @Published private(set) var caps: [CapRecord] = []
+    private(set) var caps: [CapRecord] = []
     @Published var search: String = "" { didSet { refreshVisible() } }
     @Published var showSystem = false { didSet { refreshVisible() } }
     @Published var lastMessage: String?
     @Published private(set) var lastApplied: AppliedChange?
-    /// Rolling history for the sparklines (newest last).
-    @Published private(set) var cpuHistory: [Double] = []
-    @Published private(set) var gpuHistory: [Double] = []
+    /// Rolling history for the sparklines (newest last). Kept filling while the
+    /// window is hidden — otherwise the sparkline would show a gap for exactly
+    /// the period the user was not watching, which is the part worth seeing when
+    /// they come back.
+    private(set) var cpuHistory: [Double] = []
+    private(set) var gpuHistory: [Double] = []
     @Published var sort: SortKey = .cpu { didSet { refreshVisible() } }
     /// Sort direction for the active column. Activity-Monitor style: click a
     /// column header to sort by it; click again to flip direction.
@@ -132,8 +146,61 @@ final class Monitor: ObservableObject {
         }
     }
 
-    var menuBarTitle: String {
-        sampler.hasBaseline ? "\(Int(totalCPU.rounded()))%" : "–"
+    var menuBarTitle: String { menuBar.text }
+
+    // MARK: - is anyone looking?
+
+    /// The menu-bar percentage, in its own tiny observable.
+    ///
+    /// It has to keep ticking while the window is hidden, and it cannot live on
+    /// `Monitor` to do that: publishing it there would invalidate the window too,
+    /// which is the entire cost being avoided. So the menu bar observes this and
+    /// nothing else.
+    @MainActor
+    final class MenuBarTitle: ObservableObject {
+        @Published fileprivate(set) var text = "–"
+    }
+
+    let menuBar = MenuBarTitle()
+
+    /// Whether anything is on screen that needs the numbers refreshed.
+    ///
+    /// A hidden window is not a rare state — it is the normal one for a monitor
+    /// you glance at. Sampling, auto-tame and cap reconciliation carry on
+    /// regardless; only the publishing stops.
+    private(set) var windowVisible = true
+    private(set) var menuOpen = false
+    var uiActive: Bool { windowVisible || menuOpen }
+
+    /// Last tick's readings, so becoming visible can publish immediately without
+    /// taking a fresh sample. Re-sampling here would measure a millisecond-long
+    /// interval and report nonsense percentages for it.
+    private var lastCPU: Double = 0
+    private var lastGPU: Int?
+
+    func setWindowVisible(_ visible: Bool) {
+        guard visible != windowVisible else { return }
+        windowVisible = visible
+        uiActiveChanged()
+    }
+
+    func setMenuOpen(_ open: Bool) {
+        guard open != menuOpen else { return }
+        menuOpen = open
+        uiActiveChanged()
+    }
+
+    private func uiActiveChanged() {
+        guard uiActive else { return }
+        publishForUI()
+    }
+
+    /// Everything the window reads and the rest of the app does not.
+    private func publishForUI() {
+        totalCPU = lastCPU
+        gpu = lastGPU
+        memory = SystemStats.memory()
+        refreshVisible()
     }
 
     // MARK: - sampling
@@ -161,22 +228,28 @@ final class Monitor: ObservableObject {
         model = m
         throttled = store.all.sorted { $0.at > $1.at }
         reconcileCaps()
-        totalCPU = min(100, procs.reduce(0) { $0 + $1.cpuPct } / Double(SystemStats.coreCount))
-        gpu = SystemStats.gpuUtilization()
-        memory = SystemStats.memory()
+
+        lastCPU = min(100, procs.reduce(0) { $0 + $1.cpuPct } / Double(SystemStats.coreCount))
+        lastGPU = SystemStats.gpuUtilization()
 
         if sampler.hasBaseline {
-            cpuHistory.append(totalCPU)
-            gpuHistory.append(Double(gpu ?? 0))
+            cpuHistory.append(lastCPU)
+            gpuHistory.append(Double(lastGPU ?? 0))
             if cpuHistory.count > 60 { cpuHistory.removeFirst() }
             if gpuHistory.count > 60 { gpuHistory.removeFirst() }
         }
 
+        // The glance always stays live, hidden window or not.
+        menuBar.text = sampler.hasBaseline ? "\(Int(lastCPU.rounded()))%" : "–"
+
         if autoTame { autoTameTick() }
 
-        // Last: autoTameTick can change what's throttled, which the filter and the
-        // priority sort both read.
-        refreshVisible()
+        // Below this line everything notifies SwiftUI, and a notification means a
+        // full window rebuild — ~90% of what this app costs. With nothing on
+        // screen to notify, it buys nothing. Note the order: autoTameTick can
+        // change what's throttled, which both the filter and the priority sort read.
+        guard uiActive else { return }
+        publishForUI()
     }
 
     // MARK: - actions
