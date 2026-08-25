@@ -18,17 +18,17 @@ final class Monitor: ObservableObject {
     @Published private(set) var throttled: [ThrottleRecord] = []
     /// Groups currently held under a hard CPU cap (suspend/resume duty cycle).
     @Published private(set) var caps: [CapRecord] = []
-    @Published var search: String = ""
-    @Published var showSystem = false
+    @Published var search: String = "" { didSet { refreshVisible() } }
+    @Published var showSystem = false { didSet { refreshVisible() } }
     @Published var lastMessage: String?
     @Published private(set) var lastApplied: AppliedChange?
     /// Rolling history for the sparklines (newest last).
     @Published private(set) var cpuHistory: [Double] = []
     @Published private(set) var gpuHistory: [Double] = []
-    @Published var sort: SortKey = .cpu
+    @Published var sort: SortKey = .cpu { didSet { refreshVisible() } }
     /// Sort direction for the active column. Activity-Monitor style: click a
     /// column header to sort by it; click again to flip direction.
-    @Published var sortAscending = false
+    @Published var sortAscending = false { didSet { refreshVisible() } }
 
     /// Row positions are held still while the pointer is over the table.
     ///
@@ -60,6 +60,7 @@ final class Monitor: ObservableObject {
         guard want != orderFrozen else { return }
         if want { frozenKeys = visibleGroups.map(\.key) }
         orderFrozen = want
+        refreshVisible()
     }
 
     // Real browser tabs (title + jump), keyed by browser app name. The OS can't
@@ -172,6 +173,10 @@ final class Monitor: ObservableObject {
         }
 
         if autoTame { autoTameTick() }
+
+        // Last: autoTameTick can change what's throttled, which the filter and the
+        // priority sort both read.
+        refreshVisible()
     }
 
     // MARK: - actions
@@ -541,7 +546,20 @@ final class Monitor: ObservableObject {
 
     // MARK: - view helpers
 
-    var visibleGroups: [ProcGroup] {
+    /// The table's rows, recomputed once per tick rather than once per read.
+    ///
+    /// This used to be a computed property, and `MainWindow` reads it three times
+    /// in a single body pass — the "N apps" count, the empty check, and the rows
+    /// themselves. A filter plus a sort over every group on the machine therefore
+    /// ran three times per redraw to produce one answer, and more than that
+    /// whenever anything in the window was animating. It is now recomputed
+    /// exactly when its inputs change.
+    @Published private(set) var visibleGroups: [ProcGroup] = []
+
+    /// Everything `visibleGroups` depends on that isn't the model itself.
+    private func refreshVisible() { visibleGroups = computeVisibleGroups() }
+
+    private func computeVisibleGroups() -> [ProcGroup] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         let filtered = model.groups.filter { g in
             // Don't list ourselves — we can't act on it, so it's just noise.
