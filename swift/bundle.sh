@@ -88,8 +88,16 @@ if [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ]; then
   # Events, and ProcessX sends them to read browser tabs. Signing hardened
   # without them ships a build whose tab feature fails with the same error code
   # as a permission denial.
-  codesign --force --sign "$SIGN_ID" --options runtime --timestamp \
-           --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/ProcessX"
+  #
+  # One call, not two. Signing the bundle signs its main executable — the
+  # signature and the entitlements are embedded in that Mach-O, not bolted on
+  # beside it — so the separate pass over Contents/MacOS/ProcessX that used to
+  # run first was overwritten by this one every time. It bought nothing and cost
+  # an authorization prompt per build, because the Developer ID private key lives
+  # in the System keychain and every use of it is gated. The self-test's [signing]
+  # section is what makes dropping it safe to assert rather than hope: it reads
+  # the *running binary's own* embedded entitlements and fails the build if the
+  # apple-events entitlement is missing from a hardened signature.
   codesign --force --sign "$SIGN_ID" --options runtime --timestamp \
            --entitlements "$ENTITLEMENTS" "$APP"
   echo "signed: $SIGN_ID"
