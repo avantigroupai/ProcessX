@@ -454,6 +454,10 @@ struct BigGroupRow: View {
     /// Set when a cap was chosen but the one-time explainer hasn't been accepted.
     @State private var pendingCap: Double?
 
+    /// A browser opens to show tabs and renderers even when it is a single
+    /// process, so process count alone is the wrong test.
+    private var canExpand: Bool { group.count > 1 || monitor.isBrowser(group) }
+
     private var ourThrottled: Int { group.procs.filter { monitor.isThrottledByUs($0.pid) }.count }
     private var capRecord: CapRecord? { monitor.cap(forKey: group.key) }
 
@@ -472,12 +476,8 @@ struct BigGroupRow: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 HStack(spacing: 11) {
-                    Button { toggledOpen = !expanded } label: {
-                        glyph("chevron.right", 11)
-                            .rotationEffect(.degrees(expanded ? 90 : 0))
-                            .foregroundStyle(.secondary).frame(width: 14)
-                    }
-                    .buttonStyle(.plain).opacity(group.count > 1 ? 1 : 0).disabled(group.count <= 1)
+                    DisclosureChevron(expanded: expanded, accent: accent) { toggledOpen = !expanded }
+                        .opacity(canExpand ? 1 : 0).disabled(!canExpand)
 
                     glyph(kindIcon, UI.body).foregroundStyle(.secondary).frame(width: 18)
                     Text(group.name).font(.system(size: UI.row, weight: .medium)).lineLimit(1)
@@ -502,6 +502,12 @@ struct BigGroupRow: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Aiming at a disclosure triangle is a needless precision task when
+                // everything beside it — icon, name, count, pills — is inert. The
+                // whole leading strip is the target; the buttons inside it (info,
+                // and the actions further right) still take their own clicks first.
+                .contentShape(Rectangle())
+                .onTapGesture { if canExpand { toggledOpen = !expanded } }
 
                 CPUCell(pct: group.cpu, accent: accent).frame(width: 180, alignment: .trailing)
                 Text(fmtBytes(group.mem)).font(.system(size: UI.num)).monospacedDigit()
@@ -1006,6 +1012,39 @@ private struct CPUCell: View {
                         .frame(width: max(pct > 0.5 ? 3 : 0, min(1, pct / 100) * 78), height: 5)
                 }
         }
+    }
+}
+
+/// The disclosure triangle, and the reason it needs its own view.
+///
+/// A `.plain` Button hit-tests only the pixels its label actually paints. The
+/// first version wrapped an 11pt chevron in a 14pt frame with no contentShape,
+/// so the clickable region was the glyph's own ~2pt stroke: every click landing
+/// in the surrounding transparency did nothing, and expanding a row routinely
+/// took two or three attempts.
+///
+/// The glyph stays 11pt — this is not a visual change. The *target* becomes a
+/// full-row-height rectangle, and it keeps the same 14pt width so no other
+/// column shifts. Hover tints it so the affordance is visible before the click.
+private struct DisclosureChevron: View {
+    var expanded: Bool
+    var accent: Color
+    var action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            glyph("chevron.right", 11)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+                .foregroundStyle(hovering ? AnyShapeStyle(accent) : AnyShapeStyle(.secondary))
+                .frame(width: 14, height: UI.rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.14), value: expanded)
+        .accessibilityLabel(expanded ? "Collapse" : "Expand")
+        .help(expanded ? "Collapse — or click the row" : "Expand — or click the row")
     }
 }
 
