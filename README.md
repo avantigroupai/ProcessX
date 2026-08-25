@@ -36,6 +36,8 @@ caps) live in `policy.json` and are loaded by the Node server under `lib/`.
   instead of hiding inside "Terminal".
 - **Browser tabs** — expanding a browser row lists its renderer processes
   ("tab / page"), so one heavy tab can be slowed without touching the browser.
+  Helpers launched with `--extension-process` are labelled "extension" instead:
+  they are renderers, but they serve no tab (13 of 36 on one Chrome).
   (macOS does not expose tab *titles* per renderer without a debugging port, so
   rows are identified by renderer PID.)
 - **One-click "Slow down"** — moves a process (or a whole app group) into
@@ -127,6 +129,10 @@ do by calling `taskpolicy` directly.
   inherent to the technique, not a bug in this implementation.
 - **Browser tabs are identified by renderer PID**, not page title — reading tab
   titles would require attaching to each browser's debug port.
+- **A renderer outside the background band is not necessarily on screen.**
+  Browsers park hidden tabs themselves, but lazily: on one Chrome, 14 page
+  renderers sat above the background band against 4 tabs actually on screen. The
+  band tells you a renderer is not parked, nothing more.
 
 ## Tuning
 
