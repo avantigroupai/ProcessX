@@ -22,6 +22,16 @@ final class Monitor: ObservableObject {
     /// them unpublished is what lets `tick` go quiet while the window is hidden;
     /// the properties that only the window reads are assigned below the
     /// `uiActive` gate, and re-reading these is part of that redraw.
+    ///
+    /// **Rule for view code:** a view may read these, but must never be the only
+    /// reason a redraw is needed. Nothing here triggers one. Today the browser
+    /// row's renderer list reads `model` via `BrowserProcs.breakdown`, and it
+    /// stays correct only because a visible tick publishes something *else* in
+    /// the same pass. A view whose content depended on one of these five alone
+    /// would freeze while looking perfectly normal — no crash, no blank space,
+    /// just a number that quietly stopped being true. If you need a view to
+    /// react to one of these, publish a derived value next to `visibleGroups`
+    /// rather than reaching in here.
     private(set) var model = Model()
     @Published private(set) var totalCPU: Double = 0      // % of the whole machine
     @Published private(set) var gpu: Int?
