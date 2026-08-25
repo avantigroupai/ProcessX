@@ -43,3 +43,187 @@ records what was found and what changed. Re-run everything with `node qa/qa.mjs`
   its own `--selftest` and is out of scope here.
 - Contrast is checked at AA (4.5 normal / 3.0 large). Chip backgrounds are
   modelled as their translucent tint over the theme surface — the worst case.
+
+---
+
+# ProcessX's own CPU cost — profiling the native app
+
+ProcessX's whole pitch is reducing CPU contention, so its own footprint is part
+of the product claim. On a busy session it had been seen as the third-highest
+CPU consumer on the machine. This section profiles the **native Swift app**
+under `swift/` — previously out of scope above — and records what it cost, where
+the cost was, and what changed.
+
+Reproduce with `swift/.build/release/ProcessX --bench`, `--bench-live`,
+`--bench-view`, and `qa/cpucost.sh <pid> <seconds> <label>`.
+
+## How it was measured
+
+`ps %cpu` is a decaying average and reported anything from 1.9% to 49% for the
+same process, so every number here is a **cumulative-CPU-time delta**
+(`ps -o time=` twice over a fixed wall-clock window) — that is what
+`qa/cpucost.sh` does.
+
+Three measurement traps had to be closed before any number meant anything:
+
+| Trap | Effect | What it took |
+|---|---|---|
+| **Window occlusion** | A fully covered window stops redrawing. The moment a second window covered the running app it fell from 13.3% to 9.9% with no code change. | Measure one instance at a time, always frontmost and unobscured. |
+| **E-core vs P-core billing** | On Apple Silicon CPU *time* is not a unit of work — the same build measured 57 ms and 178 ms per window pass depending on which cores it got. A benchmark launched from a shell inherits the shell's priority and lands on efficiency cores. | `pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE)` in the benchmarks; `open -n` (not a shell launch) for live runs. |
+| **Machine drift** | Load average moved between 9 and 25 during the session; single readings varied 3×. | Before/after builds measured **interleaved**, six 40 s rounds each, compared by median. |
+
+## Baseline — the two suspects, separated
+
+Measured on macOS 26.7, 8 cores (M3), ~870 processes, load average 9–25.
+
+**Suspect 1 — sampling.** `--bench`, 25 iterations over 870 processes:
+
+| Step | CPU per tick |
+|---|---|
+| `proc_listpids` (whole table) | 0.03 ms |
+| `proc_pidinfo` PROC_PIDTASKALLINFO ×870 | 0.60 ms |
+| `proc_pidpath` ×870 | 1.32 ms |
+| **`Sampler.sample()` total** | **3.05 ms** |
+| `Grouping.build()` | 11.04 ms |
+
+At a 2 s tick that whole data layer is **~14 ms / 2 s = 0.7% of one core**.
+
+**Suspect 2 — the view layer.** `--bench-live 30` runs the real `Monitor`, real
+2 s timer, real sampling and grouping and publishing, with **no window and no
+SwiftUI at all**: **1.15% of one core**. The same build with its window open and
+frontmost: **~21% of one core** (median of six interleaved 40 s runs: 17.6, 18.2,
+19.4, 22.7, 25.8, 29.3).
+
+A `sample(1)` self-time profile of the main thread agrees to within a point:
+
+| Bucket | % of samples | % of non-idle |
+|---|---|---|
+| idle (waiting for events) | 45.2% | — |
+| SwiftUI attribute graph / display list | 28.2% | 51% |
+| SwiftUI layout | 8.5% | 16% |
+| conic-gradient rasterisation | 7.4% | 14% |
+| other CoreGraphics | 3.0% | 5% |
+| `Grouping.build` | 3.5% | 6% |
+| libproc syscalls (`__proc_info`) | 1.2% | 2% |
+| `Monitor.tick`, everything else | 0.7% | 1% |
+
+**Verdict: ~90% of ProcessX's CPU was the view layer; ~9% was the model layer,
+and only ~2% was the libproc walk the sampling hypothesis pointed at.**
+
+## What the sampling hypothesis got wrong
+
+The proposal was to cache `proc_pidpath` by pid, since a pid's path never
+changes. Two reasons that was the wrong fix:
+
+1. **The payoff isn't there.** `proc_pidpath` is 1.32 ms per tick — 0.065% of one
+   core. Removing it entirely would not be visible next to a 21% reading.
+2. **A pid's path *can* change.** `exec()` replaces the executable while keeping
+   the pid, and pids are recycled. `Monitor.restore` compares `p.path` against
+   the stored record precisely so a throttle is never lifted off a recycled pid;
+   a stale cached path would poison that guard.
+
+What *was* real in that area: the function allocated a fresh 4 KB `[CChar]` per
+call — a thousand allocations per tick, costing more than the syscall. That is
+now one reused scratch buffer, which is free and carries no correctness risk.
+
+## Fixes
+
+**1. The gauge rings' angular gradient — 14% of non-idle CPU.**
+`RadialGauge` stroked its arc with an `AngularGradient`. CoreGraphics has no
+hardware path for a conic gradient: it shades one in software with an `atan2f`
+per pixel and re-shades on every change. `atan2f` was the single largest non-idle
+leaf in the profile. Replaced with a top-to-bottom `LinearGradient`, which on a
+circle agrees with the old ramp where it matters — `accent` at 12 o'clock,
+`accent2` at 6, the midpoint at 3 and 9.
+
+**2. The ring's 0.5 s ease — the single biggest item, ~14 points of one core.**
+`.animation(.easeOut(duration: 0.5), value: progress)` on the trim made SwiftUI
+rebuild the window's view graph and re-run `NSHostingView.layout` **once per
+display frame** — roughly 10 ms each, thirty times per two-second tick, to move
+an arc. Removing it alone took the app from 19.7% to 5.3%. Wrapping it in
+`.drawingGroup()` instead changed nothing (17.6%): the cost is the graph pass,
+not the rasterisation. The ring now steps, which is also the more honest reading
+— the number inside it has always snapped, because the sample behind it is a
+two-second average with nothing in between.
+
+**3. `visibleGroups` was a computed property.** `MainWindow` reads it three times
+per body pass (the "N apps" count, the empty check, the rows), so a filter plus a
+sort over every group on the machine ran repeatedly to produce one answer. Now
+recomputed exactly when its inputs change.
+
+**4. `Model.isFront` and `Model.group(for:)` were linear scans.** `isFront` is
+asked once per row per redraw *and once per process* in the auto-tame pass —
+a quadratic walk over the process table every two seconds. Both are now
+O(1) lookups off a precomputed set and key→index map.
+
+**5. `Grouping.appName` ran a regex per ancestor per process.**
+`path.range(of:options:.regularExpression)` recompiles an `NSRegularExpression`
+on every call; `build()` called it thousands of times per tick, and ICU regex
+matching showed up inside the sampling tick in the profile. Replaced with a
+literal `.app/` search, plus a per-build memo since siblings share ancestors.
+`Grouping.build()` went from **11.04 ms to 3.34 ms**.
+
+**6. Rows observed the whole `Monitor`.** `Monitor` is a plain
+`ObservableObject`, so every `@Published` change invalidates every observer, and
+a tick changes eight of them. Sixty rows each held an `@ObservedObject`
+subscription to reach a conclusion the parent had already reached. Rows now take
+a plain reference; `MainWindow` does the observing.
+
+**7. `ourThrottled` filtered a group's whole process list on every body
+evaluation** — three times per row per redraw, and again inside the priority
+sort's comparator. Now computed once per tick into `ProcGroup.throttledByUs`.
+
+**8. `proc_pidpath`'s per-call 4 KB allocation** replaced with a reused buffer
+(see above).
+
+## A bug this work introduced, and the test that now catches it
+
+Adding the key→index map broke the cap path: `Monitor.tick` sorts `model.groups`
+*after* `Grouping.build` returns, so an index built inside `build` pointed every
+key at the wrong group. `--selftest` caught it immediately — five failures in
+`[cap via Monitor]`, where a cap was recorded against a different app than the
+one the menu was opened on.
+
+The fix makes the mistake unrepresentable: `Model.groups` rebuilds its index in
+`didSet`, so any reordering re-indexes itself. A new check in `[grouping]` sorts
+the model the way `tick` does and asserts the map still agrees with a linear
+scan; it was confirmed to fail against the broken version.
+
+## Result
+
+| Measurement | Before | After |
+|---|---|---|
+| Window open and frontmost (median of 6 interleaved 40 s runs) | **21.1%** of one core | **7.6%** of one core |
+| Quiet machine, best of those runs | 17.6% | **5.0%** |
+| Model layer only, no view layer (`--bench-live`) | 1.15% | **0.61%** |
+| One full window build + layout + draw (`--bench-view`) | ~0.9 ms per visible group | ~0.65 ms per visible group |
+| `Sampler.sample()` per tick † | 3.05 ms | 2.41 ms |
+| `Grouping.build()` per tick † | 11.04 ms | 2.83 ms |
+
+† `--bench` figures are best-of-three on each side and were taken hours apart, so
+the machine was not in the same state; treat them as the right order of magnitude
+rather than a controlled comparison. The window-open rows above *are* controlled
+— those runs were interleaved.
+
+`--selftest` is green (79 checks) after every change.
+
+## Limits — what is not fixed
+
+- **The <5% target is met on a quiet machine, not on a busy one.** Final readings
+  ranged 5.0%–13.7% across six runs. The spread is not noise in the measurement;
+  it is the machine. Under load the app's work migrates to efficiency cores,
+  where identical work bills more CPU-seconds, and a pointer resting over the
+  table re-renders rows continuously.
+- **The remaining cost is one window redraw per tick, ~50 ms of CPU.** That is
+  inherent to rebuilding ~15 rich rows and four gauge cards in SwiftUI, and
+  cutting it further needs the rows to take a small `Equatable` value instead of
+  the whole `ProcGroup` (which carries every `ProcSample` in the group), so
+  SwiftUI can skip subtrees that did not change. Not attempted here.
+- **Ablation below the ~2× noise floor was not possible on this machine.**
+  Removing the row tooltip, the cap menu, the glass button style and the Liquid
+  Glass theme all produced differences smaller than the run-to-run spread. Those
+  are unmeasured, not cleared.
+- **Cost tracks window visibility.** A ProcessX whose window is covered by
+  another window costs a fraction of one that is on top. Menu-bar-only operation
+  is the cheap mode by a wide margin (0.61% vs 5–14%), which is worth saying in
+  the README rather than leaving users to discover.
