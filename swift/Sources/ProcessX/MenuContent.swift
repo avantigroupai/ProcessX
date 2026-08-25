@@ -178,7 +178,11 @@ private struct Tile: View {
 
 struct GroupRow: View {
     var group: ProcGroup
-    @ObservedObject var monitor: Monitor
+    /// Plain reference, not `@ObservedObject` — same reason as the window's rows.
+    /// Every `@Published` change on `Monitor` invalidates every observer, so a row
+    /// that subscribes is asking to be told things its parent already reacted to.
+    /// `MenuContent` above does the observing.
+    let monitor: Monitor
     @State private var expanded = false
     @State private var hovering = false
 
@@ -318,7 +322,7 @@ struct GroupRow: View {
 private struct MenuTabRow: View {
     var tab: BrowserTab
     var appName: String
-    @ObservedObject var monitor: Monitor
+    let monitor: Monitor
     @State private var hovering = false
 
     var body: some View {
@@ -344,7 +348,7 @@ private struct MenuTabRow: View {
 
 private struct ChildRow: View {
     var proc: ProcSample
-    @ObservedObject var monitor: Monitor
+    let monitor: Monitor
 
     var body: some View {
         HStack(spacing: ms(7)) {
