@@ -271,6 +271,20 @@ Also in this pass: the popover's four row types stopped holding their own
 **Limit.** `NSWindow.occlusionState` reports "not visible" only when a window is
 *entirely* covered. A window with a corner showing pays full price.
 
+## Where it landed
+
+Measured by the user on the installed build, window visible and frontmost, 60 s:
+
+| State | CPU |
+|---|---|
+| Window visible and frontmost | **4.31%** of one core |
+| Window completely covered | **1.36%** |
+| Menu bar only, no window (`--bench-live`) | **0.61–0.81%** |
+
+Against a starting point of ~21% with the window open, **the under-5% target is
+met in the state it was set for**, and the two cheaper states are new: before
+this work a covered window cost nearly what a visible one did.
+
 ## Limits — what is not fixed
 
 - **The <5% target is met on a quiet machine, not on a busy one.** Final readings
@@ -278,11 +292,30 @@ Also in this pass: the popover's four row types stopped holding their own
   it is the machine. Under load the app's work migrates to efficiency cores,
   where identical work bills more CPU-seconds, and a pointer resting over the
   table re-renders rows continuously.
-- **The remaining cost is one window redraw per tick, ~50 ms of CPU.** That is
-  inherent to rebuilding ~15 rich rows and four gauge cards in SwiftUI, and
-  cutting it further needs the rows to take a small `Equatable` value instead of
-  the whole `ProcGroup` (which carries every `ProcSample` in the group), so
-  SwiftUI can skip subtrees that did not change. Not attempted here.
+- **The remaining cost is one window redraw per tick, ~50 ms of CPU**, rebuilding
+  ~15 rich rows and four gauge cards. Every row is rebuilt every tick even though
+  most of them display the same thing they displayed last tick: CPU is drawn at
+  `%.1f%%` and memory at whole MB, so an idle daemon's row is visually identical
+  from one tick to the next. SwiftUI cannot tell, because its default update
+  check reflects over the whole `ProcGroup` — including `procs`, which for a
+  browser row is ~90 `ProcSample`s carrying two strings each.
+
+  Making the row `Equatable` over what it actually draws would skip most rows.
+  The obvious version of that is wrong, and worth writing down so nobody ships it:
+  **a row is not a pure function of its `ProcGroup`.** The child rows read
+  `isThrottledByUs`, `origin`, `isProtected` and `isQuittable` per process, and
+  `TabRow` reads `monitor.browserTabs`, none of which live in the group. An
+  `Equatable` projection built from the group alone would leave a "slowed" pill or
+  a tab list silently frozen — the worst failure mode this app has, because it
+  looks like an answer.
+
+  The version that would work: have `Monitor` compute a `renderDigest` per group
+  in the same per-tick pass that already computes `throttledByUs`, covering
+  everything the row *and its children* draw — it can see the throttle store, the
+  cap records and the tab list, so it can cover all of it — and compare on that.
+  O(1) per row, complete by construction, and one function to audit rather than
+  a projection scattered across four view types. Not attempted, because the
+  target was already met and the failure mode is silent.
 - **Ablation below the ~2× noise floor was not possible on this machine.**
   Removing the row tooltip, the cap menu, the glass button style and the Liquid
   Glass theme all produced differences smaller than the run-to-run spread. Those
