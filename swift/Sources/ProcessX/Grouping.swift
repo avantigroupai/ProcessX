@@ -13,6 +13,15 @@ struct ProcGroup: Identifiable {
     var procs: [ProcSample] = []
     var isSystem: Bool = true
     var isCritical: Bool = false
+    /// How many of `procs` **ProcessX** has throttled. Filled in by `Monitor`
+    /// once per tick, because the answer lives in the throttle store rather than
+    /// in the process table.
+    ///
+    /// It is stored rather than computed because both readers are hot: the row
+    /// body asks three times per redraw, and the priority sort asks inside the
+    /// comparator — which turned a filter over every process in a group into an
+    /// O(n log n · procs) walk on every sort.
+    var throttledByUs: Int = 0
     var id: String { key }
 
     var count: Int { procs.count }
@@ -25,9 +34,27 @@ struct ProcGroup: Identifiable {
 }
 
 struct Model {
-    var groups: [ProcGroup] = []
+    /// Reindexes itself on every assignment. `Monitor.tick` sorts this array
+    /// *after* `build` returns, and an index built before that sort silently
+    /// points every key at the wrong group — which is exactly how a cap ended up
+    /// recorded against a different app than the one the menu was opened on.
+    /// Keeping the index in a `didSet` makes that mistake unrepresentable.
+    var groups: [ProcGroup] = [] { didSet { reindex() } }
     var byPID: [pid_t: ProcSample] = [:]
     var frontKey: String?
+    /// The frontmost group plus every CLI group it hosts — precomputed, because
+    /// `isFront` is asked once per row per redraw and once per *process* in the
+    /// auto-tame pass. Resolving it by scanning `groups` made that a quadratic
+    /// walk over the whole process table every two seconds.
+    var frontKeys: Set<String> = []
+    /// Key → index into `groups`, for the same reason.
+    private(set) var indexByKey: [String: Int] = [:]
+
+    private mutating func reindex() {
+        indexByKey.removeAll(keepingCapacity: true)
+        indexByKey.reserveCapacity(groups.count)
+        for (i, g) in groups.enumerated() { indexByKey[g.key] = i }
+    }
 
     /// A process is "in the foreground" if its group is frontmost, OR it's a
     /// terminal-hosted CLI whose host terminal is frontmost.
@@ -36,13 +63,11 @@ struct Model {
     /// exists to tame — never registers as focused, because its group is c:<pid>
     /// while the frontmost app group is a:<Terminal>. That blind spot would both
     /// throttle a session you're actively using and break its focus rescue.
-    func isFront(_ groupKey: String) -> Bool {
-        guard let front = frontKey else { return false }
-        if groupKey == front { return true }
-        return groups.first { $0.key == groupKey }?.parentKey == front
-    }
+    func isFront(_ groupKey: String) -> Bool { frontKeys.contains(groupKey) }
 
-    func group(for key: String) -> ProcGroup? { groups.first { $0.key == key } }
+    func group(for key: String) -> ProcGroup? {
+        indexByKey[key].map { groups[$0] }
+    }
 }
 
 enum Grouping {
@@ -59,10 +84,20 @@ enum Grouping {
     }
 
     /// "/Applications/Foo.app/Contents/MacOS/Foo" -> "Foo"
+    ///
+    /// Scanned by hand rather than by regex. `build()` calls this once per
+    /// ancestor per process — on a 900-process machine that was several thousand
+    /// `NSRegularExpression` evaluations every two seconds, and it showed up in a
+    /// profile as ICU regex matching inside the sampling tick. A literal scan for
+    /// ".app/" does the same job with no allocation and no matcher.
     static func appName(of path: String) -> String? {
-        guard let r = path.range(of: #"/([^/]+)\.app/"#, options: .regularExpression) else { return nil }
-        let seg = String(path[r]).dropFirst().dropLast()          // "Foo.app"
-        return String(seg.dropLast(4))                            // "Foo"
+        // Leftmost ".app/", matching what the regex found. Everything between the
+        // slash before it and the extension is the bundle name.
+        guard let ext = path.range(of: ".app/") else { return nil }
+        let before = path[path.startIndex..<ext.lowerBound]
+        guard let slash = before.lastIndex(of: "/") else { return nil }
+        let name = before[before.index(after: slash)...]
+        return name.isEmpty ? nil : String(name)
     }
 
     static func baseName(_ p: String) -> String {
@@ -80,6 +115,7 @@ enum Grouping {
 
         var groups: [String: ProcGroup] = [:]
         var order: [String] = []
+        var appNameCache: [String: String?] = [:]
 
         func assign(_ p: ProcSample, key: String, name: String, kind: GroupKind, parentKey: String?) {
             if groups[key] == nil {
@@ -109,13 +145,23 @@ enum Grouping {
 
             // The app bundle closest to launchd owns the tree:
             // "Chrome Helper (Renderer)" belongs to "Google Chrome".
+            // Siblings share ancestors, so the same paths come round again and
+            // again within one build — memoise rather than re-parse.
             var appIdx: Int?
-            for i in stride(from: chain.count - 1, through: 0, by: -1) where appName(of: chain[i].path) != nil {
-                appIdx = i
-                break
+            var appAtIdx: String?
+            for i in stride(from: chain.count - 1, through: 0, by: -1) {
+                let path = chain[i].path
+                let name: String?
+                if let cached = appNameCache[path] { name = cached }
+                else { name = appName(of: path); appNameCache[path] = name }
+                if let name {
+                    appIdx = i
+                    appAtIdx = name
+                    break
+                }
             }
 
-            if let ai = appIdx, let app = appName(of: chain[ai].path) {
+            if let ai = appIdx, let app = appAtIdx {
                 if Policy.terminals.contains(app) {
                     // First non-shell process below the terminal is the session root.
                     var sessionIdx: Int?
@@ -142,6 +188,10 @@ enum Grouping {
 
         var model = Model(byPID: byPID, frontKey: frontKey)
         model.groups = order.compactMap { groups[$0] }
+        if let front = frontKey {
+            model.frontKeys = [front]
+            for g in model.groups where g.parentKey == front { model.frontKeys.insert(g.key) }
+        }
         return model
     }
 

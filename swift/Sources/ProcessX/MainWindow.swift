@@ -305,18 +305,42 @@ struct RadialGauge: View {
     var track: Color
     var lineWidth: CGFloat = 11
 
+    /// A **linear** ramp, not the angular one this started as.
+    ///
+    /// CoreGraphics has no hardware path for a conic gradient: it shades one in
+    /// software with an `atan2f` per pixel, and re-shades the whole ring every
+    /// time the trim moves. Profiling the window put `rgba64_shade_conic_RGB`
+    /// plus `atan2f` at ~18% of the app's entire CPU — three rings costing more
+    /// than reading the whole process table. See qa/ITERATIONS.md.
+    ///
+    /// The look survives the swap because on a circle the two ramps agree where
+    /// it matters: the old gradient put `accent` at 12 o'clock, `accent2` at 6,
+    /// and the midpoint at 3 and 9 — which is exactly what a top-to-bottom
+    /// linear ramp gives. Only the easing between those points differs, and the
+    /// ring is 11pt wide.
+    private var ramp: LinearGradient {
+        LinearGradient(colors: [accent, accent2], startPoint: .top, endPoint: .bottom)
+    }
+
+    /// The ring steps to its new value; it does not ease into it.
+    ///
+    /// A `.easeOut(duration: 0.5)` on the trim looked good and cost 14% of a core.
+    /// Animating anything in this window makes SwiftUI rebuild the window's view
+    /// graph and re-run `NSHostingView.layout` once per display frame — about
+    /// 10 ms each — so a half-second ease on a two-second tick meant thirty full
+    /// window layouts to move an arc. Isolating it in a `.drawingGroup()` changed
+    /// nothing: the cost is the graph pass, not the rasterisation.
+    ///
+    /// Stepping is also the more honest reading. The number in the middle of the
+    /// ring has always snapped, because the sample it came from is a two-second
+    /// average with nothing in between; the ring now says the same thing.
     var body: some View {
         ZStack {
             Circle().stroke(track, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             Circle()
                 .trim(from: 0, to: max(0.0001, min(1, progress)))
-                .stroke(
-                    AngularGradient(gradient: Gradient(colors: [accent, accent2, accent]),
-                                    center: .center,
-                                    startAngle: .degrees(-90), endAngle: .degrees(270)),
-                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .stroke(ramp, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.5), value: progress)
         }
     }
 }
@@ -438,7 +462,14 @@ struct Sparkline: View {
 
 struct BigGroupRow: View {
     var group: ProcGroup
-    @ObservedObject var monitor: Monitor
+    /// Deliberately **not** `@ObservedObject`. `Monitor` is a plain
+    /// `ObservableObject`, so every `@Published` change invalidates every view
+    /// that observes it — and a tick changes eight of them. With sixty rows on
+    /// screen that was sixty subscriptions being torn through eight times per
+    /// tick to reach a conclusion the parent had already reached. `MainWindow`
+    /// observes the monitor; when it re-renders, rows are rebuilt with fresh
+    /// values, and SwiftUI skips the ones whose values did not change.
+    let monitor: Monitor
     var accent: Color
     /// Opens the row on first draw. Only `--render` sets this: ImageRenderer never
     /// delivers the click that would otherwise expand a row, so without it the
@@ -458,7 +489,7 @@ struct BigGroupRow: View {
     /// process, so process count alone is the wrong test.
     private var canExpand: Bool { group.count > 1 || monitor.isBrowser(group) }
 
-    private var ourThrottled: Int { group.procs.filter { monitor.isThrottledByUs($0.pid) }.count }
+    private var ourThrottled: Int { group.throttledByUs }
     private var capRecord: CapRecord? { monitor.cap(forKey: group.key) }
 
     private var info: ProcInfo {
@@ -797,7 +828,7 @@ private struct SectionRow: View {
 /// Everything past that is a shortlist, and the row prints it as one.
 private struct RendererRow: View {
     var proc: ProcSample
-    @ObservedObject var monitor: Monitor
+    let monitor: Monitor
     var accent: Color
     var isExtension = false
     var name: BrowserProcs.RowName = .none
@@ -964,7 +995,7 @@ private struct RollupRow: View {
 private struct TabRow: View {
     let tab: BrowserTab
     let appName: String
-    @ObservedObject var monitor: Monitor
+    let monitor: Monitor
     var accent: Color
     @State private var hovering = false
 
@@ -1072,7 +1103,7 @@ private struct ProcessInfoCard: View {
 
 private struct BigChildRow: View {
     var proc: ProcSample
-    @ObservedObject var monitor: Monitor
+    let monitor: Monitor
     var accent: Color
     @State private var hovering = false
 

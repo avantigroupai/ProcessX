@@ -117,6 +117,19 @@ enum SelfTest {
         check("CLI in frontmost terminal counts as FRONT (never tamed)", model.isFront(cliKey))
         check("background ffmpeg does NOT count as front (tamable)", !model.isFront(ffKey))
 
+        // `group(for:)` answers from a key→index map, and `Monitor.tick` re-sorts
+        // `groups` after `build` hands the model over. An index built before that
+        // sort resolves every key to the wrong group, silently — the menu opens on
+        // one app and the cap lands on another. Sort it here the way tick does and
+        // insist the map still agrees with a linear scan.
+        var sorted = model
+        sorted.groups.sort { $0.cpu > $1.cpu }
+        let mismatched = sorted.groups.filter { g in sorted.group(for: g.key)?.key != g.key }
+        check("group(for:) survives re-sorting the model", mismatched.isEmpty,
+              mismatched.isEmpty ? "\(sorted.groups.count) keys resolve to themselves"
+                                 : "\(mismatched.count) key(s) resolve to a different group")
+        check("re-sorted model still knows its front group", sorted.isFront(cliKey))
+
         print("\n[browser procs] renderers vs support, and the visible/background split")
         let chromePrefix = "/Applications/Google Chrome.app/Contents"
         let helpers = "\(chromePrefix)/Frameworks/Google Chrome Framework.framework/Versions/151/Helpers"
