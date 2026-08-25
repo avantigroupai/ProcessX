@@ -305,6 +305,18 @@ struct RadialGauge: View {
     var track: Color
     var lineWidth: CGFloat = 11
 
+    /// The ring steps to its new value; it does not ease into it.
+    ///
+    /// A `.easeOut(duration: 0.5)` on the trim looked good and cost 14% of a core.
+    /// Animating anything in this window makes SwiftUI rebuild the window's view
+    /// graph and re-run `NSHostingView.layout` once per display frame — about
+    /// 10 ms each — so a half-second ease on a two-second tick meant thirty full
+    /// window layouts to move an arc. Isolating it in a `.drawingGroup()` changed
+    /// nothing: the cost is the graph pass, not the rasterisation.
+    ///
+    /// Stepping is also the more honest reading. The number in the middle of the
+    /// ring has always snapped, because the sample it came from is a two-second
+    /// average with nothing in between; the ring now says the same thing.
     var body: some View {
         ZStack {
             Circle().stroke(track, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
@@ -316,7 +328,6 @@ struct RadialGauge: View {
                                     startAngle: .degrees(-90), endAngle: .degrees(270)),
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.easeOut(duration: 0.5), value: progress)
         }
     }
 }
