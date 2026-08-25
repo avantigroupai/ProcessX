@@ -438,7 +438,14 @@ struct Sparkline: View {
 
 struct BigGroupRow: View {
     var group: ProcGroup
-    @ObservedObject var monitor: Monitor
+    /// Deliberately **not** `@ObservedObject`. `Monitor` is a plain
+    /// `ObservableObject`, so every `@Published` change invalidates every view
+    /// that observes it — and a tick changes eight of them. With sixty rows on
+    /// screen that was sixty subscriptions being torn through eight times per
+    /// tick to reach a conclusion the parent had already reached. `MainWindow`
+    /// observes the monitor; when it re-renders, rows are rebuilt with fresh
+    /// values, and SwiftUI skips the ones whose values did not change.
+    let monitor: Monitor
     var accent: Color
     /// Opens the row on first draw. Only `--render` sets this: ImageRenderer never
     /// delivers the click that would otherwise expand a row, so without it the
@@ -964,7 +971,7 @@ private struct RollupRow: View {
 private struct TabRow: View {
     let tab: BrowserTab
     let appName: String
-    @ObservedObject var monitor: Monitor
+    let monitor: Monitor
     var accent: Color
     @State private var hovering = false
 
@@ -1072,7 +1079,7 @@ private struct ProcessInfoCard: View {
 
 private struct BigChildRow: View {
     var proc: ProcSample
-    @ObservedObject var monitor: Monitor
+    let monitor: Monitor
     var accent: Color
     @State private var hovering = false
 
