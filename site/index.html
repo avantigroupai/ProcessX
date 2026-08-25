@@ -56,7 +56,7 @@
         "Opt-in hard CPU cap holds a chosen app under a set percentage by suspending and resuming it, off by default and released the moment the app comes to the front",
         "Processes grouped per app the way Activity Monitor groups them, with CLI sessions surfaced separately",
         "Browser rows expand to real open tabs by name so a single heavy tab can be slowed",
-        "The same row lists every renderer process with live CPU and memory, each marked visible or background, so a hot renderer is easy to spot",
+        "The same row lists every renderer process with live CPU and memory, page renderers separated from extension processes, and marks the ones the browser has parked in the background band, so a hot renderer is easy to spot",
         "Never touches the frontmost app, protected system processes, media and call apps, or other users' processes",
         "Native Swift menu-bar build makes zero subprocesses per sample",
         "No admin rights, no telemetry, no network calls, no background agents"
@@ -95,7 +95,7 @@
         {
           "@type": "Question",
           "name": "Can ProcessX show CPU and memory usage for each browser tab?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Not per tab \u2014 and no macOS tool can, because the operating system does not expose the mapping. macOS reports a browser's renderer processes with their CPU and memory, and Apple Events report tab titles, but nothing joins the two: that link exists only inside the browser itself. ProcessX shows both halves honestly. Expanding a browser row lists the named tabs, then every renderer process with its real CPU and memory, each marked visible or background. Browsers park hidden tabs in the low-priority band, so a renderer marked visible is serving one of the tabs currently on screen \u2014 which usually narrows a hot renderer down to a few candidates. Chrome also shares one renderer across same-site tabs, so there are always fewer renderers than tabs." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Not per tab \u2014 and no macOS tool can, because the operating system does not expose the mapping. macOS reports a browser's renderer processes with their CPU and memory, and Apple Events report tab titles, but nothing joins the two: that link exists only inside the browser itself. ProcessX shows both halves honestly. Expanding a browser row lists the named tabs, then every renderer process with its real CPU and memory. Not every helper is a tab: extension processes are marked as extensions and serve no page at all \u2014 on one Chrome, 13 of 36 helpers were extensions. Page renderers the browser has parked in the low-priority band are marked background. The rest are not necessarily on screen: Chrome demotes a hidden tab's renderer lazily, so on that same Chrome 14 page renderers sat above the background band against 4 tabs actually on screen. Not parked means still scheduled normally, not visible. Chrome also shares one renderer across same-site tabs, so there are always fewer page renderers than tabs." }
         },
         {
           "@type": "Question",
@@ -577,7 +577,7 @@
         <div class="ib"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg></div>
         <h3>Real browser tabs</h3>
         <p>Expand a browser and the native app asks it over Apple Events for its <strong>actual open tabs by name</strong> — Chrome, Brave, Edge, Vivaldi, Opera and Safari. Slow the one runaway tab, jump to it, leave the rest alone.</p>
-        <p style="margin-top:10px">Underneath, every <strong>renderer process</strong> is listed with live CPU and memory and marked <em>visible</em> or <em>background</em>. macOS never says which tab a renderer belongs to — so ProcessX shows you both halves rather than inventing the join.</p>
+        <p style="margin-top:10px">Underneath, every <strong>renderer process</strong> is listed with live CPU and memory — page renderers apart from <em>extension</em> processes, which serve no tab at all — and the ones the browser has <em>parked</em> in the background band are marked. Parked means idle; not parked doesn't mean on screen, because Chrome demotes a hidden tab's renderer lazily. macOS never says which tab a renderer belongs to — so ProcessX shows you both halves rather than inventing the join.</p>
       </div>
       <div class="feat">
         <div class="ib"><svg class="icon" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 3 8.4 7 10 4-1.6 7-5.6 7-10V6l-7-3z"/><path d="m9.2 11.8 2 2 3.6-3.8"/></svg></div>
@@ -829,7 +829,7 @@ swift run -c release ProcessX --selftest   <span class="c"># 68 real-syscall che
       <div class="codeblock" style="margin-top:16px">cd ProcessX
 node server.js   <span class="c"># → http://localhost:4747</span>
 npm test         <span class="c"># 179-check QA harness</span></div>
-      <p style="margin-top:20px">Expanding a browser row to see its real tab names asks macOS for Automation permission the first time. Decline it and you keep the renderer breakdown — CPU, memory and visible/background per process — and lose only the tab names.</p>
+      <p style="margin-top:20px">Expanding a browser row to see its real tab names asks macOS for Automation permission the first time. Decline it and you keep the renderer breakdown — CPU, memory, extension processes marked apart, and which renderers the browser has parked — and lose only the tab names.</p>
     </div>
   </div>
 </section>
