@@ -205,7 +205,32 @@ the machine was not in the same state; treat them as the right order of magnitud
 rather than a controlled comparison. The window-open rows above *are* controlled
 — those runs were interleaved.
 
-`--selftest` is green (79 checks) after every change.
+`--selftest` is green (123 checks) after every change.
+
+**When these numbers were taken.** The interleaved window-open runs were measured
+against `f1ddd58`. The branch was then rebased onto `e9eadfd`, which added
+Chromium extension-process detection and a `RowName` type to the same rows. The
+structural wins are unaffected — the ring no longer animates and the conic
+gradient is gone, and those were 32 of the 21 points between them — but that
+figure was taken before the row work landed, and the row work is not free.
+
+**Re-measured on the merged tree.** Installed build 2026.0825.1448 (universal,
+notarized), window open, 877 processes, load ~22–25, same CPU-time-delta method
+as the 20.8% baseline: **7.0% and 7.2% of one core** over two independent 40 s
+samples. So the row work upstream added did not eat the win: ~20.8% -> ~7.1%,
+about 3x, with the window open and visible.
+
+The headless controls on the same build, for the record: `--bench-live` puts the
+model layer at **0.60% of one core** with no window at all, and `--bench` puts
+`Sampler.sample()` at 3.28 ms and `Grouping.build()` at 2.87 ms per tick over 839
+processes (`Grouping.build` was 11.04 ms before the byte-scan). The gap between
+0.60% and 7.1% is the view layer, and it remains where any further work belongs.
+
+`--bench-view` is the wrong instrument for re-checking this, and it is worth
+saying why: `ImageRenderer` draws one static frame, so it cannot see the cost of
+a view that re-lays-out thirty times a tick. It measures view *construction*,
+which is what fixes 3–7 above address; the two large wins are invisible to it and
+only show up in a live window.
 
 ## Limits — what is not fixed
 
