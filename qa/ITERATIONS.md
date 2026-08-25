@@ -232,6 +232,45 @@ a view that re-lays-out thirty times a tick. It measures view *construction*,
 which is what fixes 3–7 above address; the two large wins are invisible to it and
 only show up in a live window.
 
+## Second pass — not drawing a window nobody can see
+
+The profile said the view layer was ~90% of the cost, and that the cost tracked
+window visibility: covering the window took the app from 13.3% of a core to
+9.9%. That 9.9% is the finding. AppKit stops the *rasterisation* of a covered
+window and nothing else — the SwiftUI graph pass and `NSHostingView.layout` keep
+running, drawing a window for nobody.
+
+`Monitor` now stops publishing when neither the main window nor the menu popover
+is on screen. Sampling, grouping, auto-tame and cap reconciliation are untouched;
+the app has to keep deciding things whether or not anyone is watching. Only the
+`@Published` assignments — the ones that invalidate the window — are gated.
+
+Two consequences worth knowing:
+
+- `model`, `throttled`, `caps` and the two histories are no longer `@Published`.
+  `Monitor` is a plain `ObservableObject`, so *any* published assignment
+  invalidates the window; there is no way to keep those five current for the
+  app's own logic while staying quiet for the view.
+- The menu-bar percentage moved to its own small observable object, so the glance
+  stays live while the window is silent. It cannot live on `Monitor`: publishing
+  it there would drag the window's view graph along behind it.
+
+| Window 100% covered, interleaved at equal depth | CPU |
+|---|---|
+| before this change (`5e84182`) | 3.65%, 3.99% |
+| after | 1.34%, 1.37% |
+
+**~2.8x, and 1.36% is close to the model-layer floor** (`--bench-live` reads
+0.61–0.81%). `--selftest` asserts the mechanism rather than the symptom: it
+counts `objectWillChange` emissions, and a hidden tick now emits none where it
+emitted four — while still refreshing the process table and the menu bar.
+
+Also in this pass: the popover's four row types stopped holding their own
+`@ObservedObject`, matching the window's rows.
+
+**Limit.** `NSWindow.occlusionState` reports "not visible" only when a window is
+*entirely* covered. A window with a corner showing pays full price.
+
 ## Limits — what is not fixed
 
 - **The <5% target is met on a quiet machine, not on a busy one.** Final readings
