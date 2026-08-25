@@ -187,5 +187,53 @@ if [ "${STAPLED:-no}" = yes ]; then
   fi
 fi
 
+# The distribution disk image.
+#
+# A .dmg is the format people expect to drag from, and it carries the install
+# gesture with it: the window holds the app and a symlink to /Applications, so
+# "drag to Applications" is a thing you can do rather than a sentence you have
+# to read.
+#
+# It is built AFTER stapling for the same reason the zip is — the app's ticket
+# has to be inside the image — but a stapled app in an unsigned image is still
+# not enough. The image is what gets downloaded, so it is what gets quarantined,
+# and Gatekeeper assesses it in its own right. It therefore needs its own
+# signature and its own stapled ticket; otherwise the app inside opens cleanly
+# only once the user has already been through a warning about the disk image
+# they opened it from.
+if [ "${DMG:-yes}" != "no" ]; then
+  DIST_DMG="build/ProcessX-${VERSION}-${ARCH_TAG}.dmg"
+  STAGE="$(mktemp -d)"
+  rm -f "$DIST_DMG"
+  cp -R "$APP" "$STAGE/ProcessX.app"
+  ln -s /Applications "$STAGE/Applications"
+
+  # UDZO: compressed and read-only. A read-write image would let the contents —
+  # and so the signature — change after notarization.
+  hdiutil create -volname "ProcessX $VERSION" -srcfolder "$STAGE" \
+                 -ov -format UDZO -quiet "$DIST_DMG"
+  rm -rf "$STAGE"
+
+  if [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ]; then
+    codesign --force --sign "$SIGN_ID" --timestamp "$DIST_DMG"
+    if [ "${STAPLED:-no}" = yes ] && [ -n "${PROFILE:-}" ]; then
+      echo "notarizing the disk image…"
+      DOUT="$(xcrun notarytool submit "$DIST_DMG" --keychain-profile "$PROFILE" --wait 2>&1)" || true
+      echo "$DOUT" | sed 's/^/  /'
+      if grep -qi "status: Accepted" <<<"$DOUT"; then
+        xcrun stapler staple "$DIST_DMG"
+        # `--type open` with the primary-signature context is how Gatekeeper
+        # actually assesses a disk image; `--type execute` is the wrong question
+        # to ask about one and answers it misleadingly.
+        spctl --assess --type open --context context:primary-signature \
+              --verbose=2 "$DIST_DMG" 2>&1 | sed 's/^/  /'
+      else
+        echo "note: the disk image did not notarize — a download will warn" >&2
+      fi
+    fi
+  fi
+fi
+
 echo "built: $(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
 echo "dist:  $(cd "$(dirname "$DIST_ZIP")" && pwd)/$(basename "$DIST_ZIP")"
+[ -f "${DIST_DMG:-}" ] && echo "dmg:   $(cd "$(dirname "$DIST_DMG")" && pwd)/$(basename "$DIST_DMG")"
