@@ -305,6 +305,23 @@ struct RadialGauge: View {
     var track: Color
     var lineWidth: CGFloat = 11
 
+    /// A **linear** ramp, not the angular one this started as.
+    ///
+    /// CoreGraphics has no hardware path for a conic gradient: it shades one in
+    /// software with an `atan2f` per pixel, and re-shades the whole ring every
+    /// time the trim moves. Profiling the window put `rgba64_shade_conic_RGB`
+    /// plus `atan2f` at ~18% of the app's entire CPU — three rings costing more
+    /// than reading the whole process table. See qa/ITERATIONS.md.
+    ///
+    /// The look survives the swap because on a circle the two ramps agree where
+    /// it matters: the old gradient put `accent` at 12 o'clock, `accent2` at 6,
+    /// and the midpoint at 3 and 9 — which is exactly what a top-to-bottom
+    /// linear ramp gives. Only the easing between those points differs, and the
+    /// ring is 11pt wide.
+    private var ramp: LinearGradient {
+        LinearGradient(colors: [accent, accent2], startPoint: .top, endPoint: .bottom)
+    }
+
     /// The ring steps to its new value; it does not ease into it.
     ///
     /// A `.easeOut(duration: 0.5)` on the trim looked good and cost 14% of a core.
@@ -322,11 +339,7 @@ struct RadialGauge: View {
             Circle().stroke(track, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
             Circle()
                 .trim(from: 0, to: max(0.0001, min(1, progress)))
-                .stroke(
-                    AngularGradient(gradient: Gradient(colors: [accent, accent2, accent]),
-                                    center: .center,
-                                    startAngle: .degrees(-90), endAngle: .degrees(270)),
-                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .stroke(ramp, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
     }
@@ -815,7 +828,7 @@ private struct SectionRow: View {
 /// Everything past that is a shortlist, and the row prints it as one.
 private struct RendererRow: View {
     var proc: ProcSample
-    @ObservedObject var monitor: Monitor
+    let monitor: Monitor
     var accent: Color
     var isExtension = false
     var name: BrowserProcs.RowName = .none
