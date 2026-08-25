@@ -647,9 +647,15 @@ struct BigGroupRow: View {
     // A browser expands into two halves, because neither half is the whole
     // answer: the tabs have names but no numbers, the renderers have numbers but
     // no names, and macOS won't join them.
+    //
+    // Renderers come first. The tab list is unbounded — a real browser here had
+    // 56 of them — so putting it on top buried the only measured numbers in the
+    // row under a screen and a half of names, and expanding Chrome to find a CPU
+    // hog showed you everything except the CPU. The half with numbers goes where
+    // it is visible the moment the row opens.
     @ViewBuilder private var browserDetail: some View {
-        browserTabList
         browserRendererList
+        browserTabList
     }
 
     // Real tabs for a scriptable browser: names you recognise, double-click to
