@@ -94,11 +94,11 @@ struct MainWindow: View {
                     .font(.system(size: UI.body, weight: .semibold))
                     .padding(.horizontal, 12).padding(.vertical, 7)
             }
-            .buttonStyle(.glassProminent)
-            // Kill the system focus ring: .glassProminent makes this the window's
-            // default control, so macOS draws an accent-coloured focus ring around
-            // it (in the user's *System Settings* accent — green here), which reads
-            // as a stray border on the glass. The button stays fully clickable.
+            .buttonStyle(ProminentAction(accent: theme.accent, accent2: theme.accent2))
+            // Kill the system focus ring: as the window's default control, macOS
+            // draws an accent-coloured ring around it (in the user's *System
+            // Settings* accent — green here), which reads as a stray border. The
+            // button stays fully clickable.
             .focusEffectDisabled()
             .help("Slow background hogs (Claude Desktop/Code, Cowork, other high-CPU background work) so the system stays snappy. Never touches the app you're using, protected system processes, or media/call apps. Fully reversible.")
         }
@@ -1045,6 +1045,32 @@ private struct DisclosureChevron: View {
         .animation(.easeOut(duration: 0.14), value: expanded)
         .accessibilityLabel(expanded ? "Collapse" : "Expand")
         .help(expanded ? "Collapse — or click the row" : "Expand — or click the row")
+    }
+}
+
+/// The window's primary action.
+///
+/// `.glassProminent` paints its own specular rim, and on a dark window that rim
+/// lands as a desaturated grey outline a shade off the blue fill — a border
+/// nobody chose, and one `.focusEffectDisabled()` does not remove because it is
+/// not the focus ring. Here the fill, the edge and the glow are all struck from
+/// the same accent, so the edge reads as the button's own light instead of a
+/// frame around it: a hairline highlight on top, an accent shadow beneath.
+private struct ProminentAction: ButtonStyle {
+    var accent: Color
+    var accent2: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        configuration.label
+            .foregroundStyle(.white)
+            .background(LinearGradient(colors: [accent2, accent],
+                                       startPoint: .top, endPoint: .bottom), in: shape)
+            .overlay(shape.strokeBorder(Color.white.opacity(0.22), lineWidth: 0.5))
+            .shadow(color: accent.opacity(0.38), radius: 9, y: 3)
+            .brightness(configuration.isPressed ? -0.06 : 0)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
