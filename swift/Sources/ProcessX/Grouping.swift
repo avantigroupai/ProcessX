@@ -13,6 +13,15 @@ struct ProcGroup: Identifiable {
     var procs: [ProcSample] = []
     var isSystem: Bool = true
     var isCritical: Bool = false
+    /// How many of `procs` **ProcessX** has throttled. Filled in by `Monitor`
+    /// once per tick, because the answer lives in the throttle store rather than
+    /// in the process table.
+    ///
+    /// It is stored rather than computed because both readers are hot: the row
+    /// body asks three times per redraw, and the priority sort asks inside the
+    /// comparator — which turned a filter over every process in a group into an
+    /// O(n log n · procs) walk on every sort.
+    var throttledByUs: Int = 0
     var id: String { key }
 
     var count: Int { procs.count }

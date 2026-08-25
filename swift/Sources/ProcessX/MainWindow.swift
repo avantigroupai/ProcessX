@@ -458,7 +458,7 @@ struct BigGroupRow: View {
     /// process, so process count alone is the wrong test.
     private var canExpand: Bool { group.count > 1 || monitor.isBrowser(group) }
 
-    private var ourThrottled: Int { group.procs.filter { monitor.isThrottledByUs($0.pid) }.count }
+    private var ourThrottled: Int { group.throttledByUs }
     private var capRecord: CapRecord? { monitor.cap(forKey: group.key) }
 
     private var info: ProcInfo {

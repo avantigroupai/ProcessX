@@ -145,6 +145,18 @@ final class Monitor: ObservableObject {
         m.groups.sort { $0.cpu > $1.cpu }
 
         store.reconcile(live: m.byPID)
+
+        // Annotate a local copy and assign once. Writing through `m.groups[i]`
+        // would run the array's `didSet` — and so rebuild the key index — for
+        // every group in turn, which is quadratic in the number of groups.
+        var annotated = m.groups
+        for i in annotated.indices {
+            annotated[i].throttledByUs = annotated[i].procs.reduce(0) {
+                $0 + (store.record($1.pid) == nil ? 0 : 1)
+            }
+        }
+        m.groups = annotated
+
         model = m
         throttled = store.all.sorted { $0.at > $1.at }
         reconcileCaps()
@@ -582,7 +594,7 @@ final class Monitor: ObservableObject {
     /// Priority-column rank: 0 = normal, 1 = some of the group throttled by us,
     /// 2 = the whole group in the background band.
     private func throttleRank(_ g: ProcGroup) -> Int {
-        let t = g.procs.filter { store.record($0.pid) != nil }.count
+        let t = g.throttledByUs
         return t == 0 ? 0 : (t == g.count ? 2 : 1)
     }
 

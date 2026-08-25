@@ -178,7 +178,7 @@ struct GroupRow: View {
     @State private var hovering = false
 
     /// How many of this group's processes *we* put in the background band.
-    private var ourThrottled: Int { group.procs.filter { monitor.isThrottledByUs($0.pid) }.count }
+    private var ourThrottled: Int { group.throttledByUs }
     private var capRecord: CapRecord? { monitor.cap(forKey: group.key) }
 
     var body: some View {
