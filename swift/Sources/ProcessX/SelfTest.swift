@@ -156,6 +156,69 @@ enum SelfTest {
             check("renderer + support memory reconciles with the group",
                   b.rendererMem + b.supportMem == chrome.mem)
             check("Chromium's renderers are not flagged as shared", !b.shared)
+
+            // Naming a visible renderer: only the tabs the browser reports as
+            // active are on screen, and only a lone one may be printed as a name.
+            func tab(_ w: Int, _ t: Int, active: Bool, _ title: String, _ url: String = "https://example.com/") -> BrowserTab {
+                BrowserTab(windowIndex: w, tabIndex: t, active: active, title: title, url: url)
+            }
+            let oneWindow = [tab(1, 1, active: true, "Inbox — Gmail"), tab(1, 2, active: false, "Hacker News")]
+            check("one tab on screen names the renderer",
+                  BrowserProcs.onScreen(tabs: oneWindow, shared: false) == .one("Inbox — Gmail"))
+            let twoWindows = oneWindow + [tab(2, 1, active: true, "GitHub")]
+            check("several tabs on screen give a shortlist, not a name",
+                  BrowserProcs.onScreen(tabs: twoWindows, shared: false) == .several(["Inbox — Gmail", "GitHub"]))
+            check("tabs not read yet says nothing",
+                  BrowserProcs.onScreen(tabs: nil, shared: false) == .unknown)
+            check("no tab on screen says nothing",
+                  BrowserProcs.onScreen(tabs: [tab(1, 1, active: false, "Hacker News")], shared: false) == .unknown)
+            // Safari's page processes belong to every app showing web content,
+            // so a Safari tab title must never be printed on one of them.
+            check("shared WebKit processes are never named",
+                  BrowserProcs.onScreen(tabs: oneWindow, shared: true) == .unknown)
+            check("a titleless tab falls back to its host",
+                  BrowserProcs.onScreen(tabs: [tab(1, 1, active: true, "", "https://www.github.com/x")],
+                                        shared: false) == .one("github.com"))
+
+            // How hard a row may claim, given the arithmetic. Measured on a real
+            // Chrome: 13 renderers above the background band against 4 tabs on
+            // screen — so the shortlist would be false on nine of those rows.
+            let one = BrowserProcs.OnScreen.one("Inbox — Gmail")
+            let four = BrowserProcs.OnScreen.several(["A", "B", "C", "D"])
+            check("a lone tab and a lone visible renderer is a name",
+                  BrowserProcs.rowName(onScreen: one, visibleRenderers: 1) == .name("Inbox — Gmail"))
+            check("a lone tab with rival renderers is only a maybe",
+                  BrowserProcs.rowName(onScreen: one, visibleRenderers: 6) == .maybe("Inbox — Gmail"))
+            check("as many rows as tabs on screen gives each row the shortlist",
+                  BrowserProcs.rowName(onScreen: four, visibleRenderers: 4) == .oneOf(4))
+            check("more rows than tabs on screen claims nothing per row",
+                  BrowserProcs.rowName(onScreen: four, visibleRenderers: 13) == BrowserProcs.RowName.none)
+            check("no tab data claims nothing",
+                  BrowserProcs.rowName(onScreen: .unknown, visibleRenderers: 1) == BrowserProcs.RowName.none)
+
+            // Extensions are renderers by process, never by content. Our own
+            // arguments stand in for a renderer's: the flag simply isn't there.
+            check("a process without the flag is not an extension",
+                  !ProcArgs.hasFlag(BrowserProcs.extensionFlag, pid: getpid()))
+            let me = Sampler().sample().first { $0.pid == getpid() }
+            let born = me?.startedAt ?? 0
+            check("the sampler carries a start time to identify a process by",
+                  born > 0, "pbi_start_tvsec=\(born)")
+            check("arguments are readable for our own process",
+                  ProcArgs.string(for: getpid(), startedAt: born).contains("--selftest"),
+                  ProcArgs.string(for: getpid(), startedAt: born).isEmpty ? "read nothing" : "read them")
+            check("a pid that cannot be read answers empty, not a guess",
+                  ProcArgs.string(for: pid_t(999_999)).isEmpty)
+            // The cache has to be silent on repeat and honest on recycling: same
+            // pid and start time must not touch the kernel again, a different
+            // start time must not be answered from the old tenant's argv.
+            let settled = ProcArgs.readCount
+            _ = ProcArgs.string(for: getpid(), startedAt: born)
+            check("a second look at the same process doesn't ask the kernel again",
+                  ProcArgs.readCount == settled, "\(ProcArgs.readCount - settled) extra reads")
+            _ = ProcArgs.string(for: getpid(), startedAt: born &+ 1)
+            check("a recycled pid is re-read rather than answered from the cache",
+                  ProcArgs.readCount == settled + 1, "\(ProcArgs.readCount - settled) reads")
         } else {
             check("Chrome group built", false, "no a:Google Chrome group")
         }
@@ -545,6 +608,173 @@ enum SelfTest {
             check("cap guardian round-trip", false, "\(error)")
         }
         try? FileManager.default.removeItem(at: tmpCaps)   // run() ends in exit(); no defer
+
+        print("\n[quit policy] what may never be ended")
+        let quid = getuid(), qme = getpid()
+        func qsample(_ pid: pid_t, _ name: String, _ path: String, uid: uid_t? = nil) -> ProcSample {
+            ProcSample(pid: pid, ppid: 1, uid: uid ?? quid, name: name, path: path,
+                       rss: 1, priority: 26, cpuPct: 1)
+        }
+        check("refuses ProcessX itself",
+              Policy.quitIneligibleReason(qsample(qme, "ProcessX", "/x/ProcessX"),
+                                          myUID: quid, selfPID: qme) != nil)
+        check("refuses a process ProcessX is running inside",
+              Policy.quitIneligibleReason(qsample(4242, "Ghostty", "/Applications/Ghostty.app/Contents/MacOS/Ghostty"),
+                                          myUID: quid, selfPID: qme, ancestors: [4242]) != nil)
+        check("refuses a protected system process",
+              Policy.quitIneligibleReason(qsample(9002, "WindowServer", "/System/Library/WindowServer"),
+                                          myUID: quid, selfPID: qme) != nil)
+        check("refuses another user's process",
+              Policy.quitIneligibleReason(qsample(9003, "node", "/opt/homebrew/bin/node", uid: quid &+ 1),
+                                          myUID: quid, selfPID: qme) != nil)
+        // The one place quit is *wider* than the throttle policy: QuickFast skips
+        // media apps because it acts on its own, and a button you pressed doesn't.
+        check("allows a media app on an explicit click",
+              Policy.quitIneligibleReason(qsample(9004, "Spotify", "/Applications/Spotify.app/Contents/MacOS/Spotify"),
+                                          myUID: quid, selfPID: qme) == nil)
+        check("allows an ordinary background hog",
+              Policy.quitIneligibleReason(qsample(9005, "ffmpeg", "/opt/homebrew/bin/ffmpeg"),
+                                          myUID: quid, selfPID: qme) == nil)
+
+        print("\n[quit] real SIGTERM / SIGKILL round-trips against our own children")
+        /// Foundation reaps its own children, so `isRunning` settles where a bare
+        /// path read can still be looking at a zombie.
+        func gone(_ p: Process, _ pid: pid_t, _ path: String) -> Bool {
+            !p.isRunning || Quit.hasExited(pid: pid, path: path)
+        }
+        @discardableResult
+        func waitGone(_ p: Process, _ pid: pid_t, _ path: String, _ limit: Double = 5) -> Double {
+            var waited = 0.0
+            while !gone(p, pid, path), waited < limit { Thread.sleep(forTimeInterval: 0.1); waited += 0.1 }
+            return waited
+        }
+
+        let victim = burner()
+        do {
+            try victim.run()
+            Thread.sleep(forTimeInterval: 0.4)
+            let pid = victim.processIdentifier
+            let path = executablePath(of: pid) ?? "/usr/bin/yes"
+
+            // What a recycled pid looks like: the number is alive, the program
+            // behind it is not the one we sampled. Nothing may be signalled.
+            let refused = Quit.send(pid: pid, path: "/usr/bin/definitely-not-yes", mode: .force)
+            check("identity mismatch is refused", refused != nil, refused ?? "it signalled anyway")
+            Thread.sleep(forTimeInterval: 0.2)
+            check("the process survived the refusal", !gone(victim, pid, path))
+
+            check("quit request accepted", Quit.send(pid: pid, path: path, mode: .ask) == nil)
+            let waited = waitGone(victim, pid, path)
+            check("SIGTERM ended it", gone(victim, pid, path), String(format: "after %.1fs", waited))
+        } catch {
+            check("spawn quit target", false, "\(error)")
+        }
+
+        // The capped-app case: a suspended process never runs, so it can neither
+        // see a SIGTERM nor answer a quit event. Quit has to resume it first.
+        let suspended = burner()
+        do {
+            try suspended.run()
+            Thread.sleep(forTimeInterval: 0.4)
+            let pid = suspended.processIdentifier
+            let path = executablePath(of: pid) ?? "/usr/bin/yes"
+            _ = kill(pid, SIGSTOP)
+            Thread.sleep(forTimeInterval: 0.2)
+            check("stand-in for a capped process is suspended", stopped(pid))
+
+            check("quit request accepted while suspended", Quit.send(pid: pid, path: path, mode: .ask) == nil)
+            let waited = waitGone(suspended, pid, path)
+            check("a suspended process is resumed so the quit lands", gone(suspended, pid, path),
+                  String(format: "after %.1fs", waited))
+            if !gone(suspended, pid, path) { _ = kill(pid, SIGKILL) }
+        } catch {
+            check("spawn suspended quit target", false, "\(error)")
+        }
+
+        // And the reason Force Quit exists at all.
+        let stubborn = Process()
+        stubborn.executableURL = URL(fileURLWithPath: "/bin/sh")
+        stubborn.arguments = ["-c", "trap '' TERM; while :; do sleep 0.2; done"]
+        stubborn.standardOutput = FileHandle.nullDevice
+        stubborn.standardError = FileHandle.nullDevice
+        do {
+            try stubborn.run()
+            Thread.sleep(forTimeInterval: 0.5)
+            let pid = stubborn.processIdentifier
+            let path = executablePath(of: pid) ?? "/bin/sh"
+
+            check("quit request accepted", Quit.send(pid: pid, path: path, mode: .ask) == nil)
+            Thread.sleep(forTimeInterval: 1.0)
+            check("a process that ignores SIGTERM survives Quit", !gone(stubborn, pid, path))
+
+            check("force quit accepted", Quit.send(pid: pid, path: path, mode: .force) == nil)
+            let waited = waitGone(stubborn, pid, path)
+            check("SIGKILL ends it regardless", gone(stubborn, pid, path), String(format: "after %.1fs", waited))
+        } catch {
+            check("spawn stubborn quit target", false, "\(error)")
+        }
+
+        print("\n[quit via Monitor] the real menu-click path")
+        MainActor.assumeIsolated {
+            let m = Monitor()
+
+            // Detached from our own tree (see the cap test): a child of this
+            // process shares our group, and our group is one quit must refuse.
+            let spawn = Process()
+            spawn.executableURL = URL(fileURLWithPath: "/bin/sh")
+            spawn.arguments = ["-c", "/usr/bin/yes > /dev/null 2>&1 & echo $!"]
+            let pipe = Pipe()
+            spawn.standardOutput = pipe
+            do {
+                try spawn.run()
+                let out = pipe.fileHandleForReading.readDataToEndOfFile()
+                spawn.waitUntilExit()
+                guard let pid = pid_t(String(decoding: out, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                    check("spawned a detached burner", false, "no pid on stdout"); return
+                }
+                Thread.sleep(forTimeInterval: 0.6)
+                m.tick()
+                let path = executablePath(of: pid) ?? "/usr/bin/yes"
+
+                if let key = m.model.byPID[pid]?.groupKey, let g = m.model.group(for: key) {
+                    check("the burner's group can be quit", m.quitRefusal(g) == nil,
+                          m.quitRefusal(g) ?? "eligible")
+                    m.quitGroup(g, mode: .force)
+                    var waited = 0.0
+                    while !Quit.hasExited(pid: pid, path: path), waited < 5 {
+                        Thread.sleep(forTimeInterval: 0.1); waited += 0.1
+                    }
+                    check("Monitor.quitGroup ended it", Quit.hasExited(pid: pid, path: path),
+                          String(format: "after %.1fs", waited))
+                } else {
+                    check("detached burner is in the model", false)
+                }
+                _ = kill(pid, SIGKILL)   // whatever happened above, don't leave it running
+
+                // The guard that matters most here — and note that the suite
+                // reaching the next line at all is part of the assertion.
+                m.quit(pid: getpid(), mode: .force)
+                check("refuses to quit ProcessX itself", true, "still running to say so")
+
+                if getppid() > 1, let parent = m.model.byPID[getppid()] {
+                    check("refuses to quit the process ProcessX was launched from",
+                          !m.isQuittable(parent), parent.name)
+                } else {
+                    skip("refuses to quit the process ProcessX was launched from",
+                         "launched by launchd — no ancestor in the table")
+                }
+
+                if let critical = m.model.groups.first(where: { $0.isCritical }) {
+                    check("refuses to quit \(critical.name)", m.quitRefusal(critical) != nil,
+                          m.quitRefusal(critical) ?? "it allowed it")
+                } else {
+                    skip("refuses to quit a protected group", "no critical group in the table")
+                }
+            } catch {
+                check("Monitor quit path", false, "\(error)")
+            }
+        }
 
         print("\n[order freeze] rows must not move out from under a click")
         MainActor.assumeIsolated {

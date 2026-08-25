@@ -17,6 +17,13 @@ struct BrowserTab: Identifiable, Sendable, Equatable {
         guard let h = URLComponents(string: url)?.host, !h.isEmpty else { return "" }
         return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
     }
+
+    /// What to call the tab in one line. A page that hasn't set a title still
+    /// has a host, and "github.com" beats "Untitled".
+    var displayName: String {
+        if !title.isEmpty { return title }
+        return host.isEmpty ? "Untitled" : host
+    }
 }
 
 enum BrowserEngine { case chromium, safari }

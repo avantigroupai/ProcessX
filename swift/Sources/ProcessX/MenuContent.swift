@@ -215,7 +215,7 @@ struct GroupRow: View {
                 Text(fmtBytes(group.mem))
                     .font(.system(size: ms(11))).monospacedDigit().foregroundStyle(.secondary)
                     .frame(width: ms(58), alignment: .trailing)
-                actions.frame(width: ms(78), alignment: .trailing)
+                actions.frame(width: ms(100), alignment: .trailing)
             }
             .padding(.horizontal, ms(12)).padding(.vertical, ms(5))
             .background(hovering ? Color.primary.opacity(0.05) : .clear)
@@ -285,17 +285,27 @@ struct GroupRow: View {
             }
             .foregroundStyle(.tertiary)
             .help("Protected — slowing this would hurt system stability")
-        } else if capRecord != nil {
-            // Caps are set from the main window; the menu only ever releases one.
-            Button("Uncap") { monitor.clearCap(group) }
-                .buttonStyle(.bordered).controlSize(.regular).font(.system(size: ms(10)))
-                .help("Stop suspending \(group.name) — it runs at full speed again")
-        } else if ourThrottled > 0 {
-            Button("Restore") { monitor.restoreGroup(group) }
-                .buttonStyle(.bordered).controlSize(.regular).font(.system(size: ms(10)))
         } else {
-            Button("Slow down") { monitor.throttleGroup(group) }
-                .buttonStyle(.bordered).controlSize(.regular).font(.system(size: ms(10)))
+            HStack(spacing: ms(5)) {
+                if capRecord != nil {
+                    // Caps are set from the main window; the menu only releases one.
+                    Button("Uncap") { monitor.clearCap(group) }
+                        .buttonStyle(.bordered).controlSize(.regular).font(.system(size: ms(10)))
+                        .help("Stop suspending \(group.name) — it runs at full speed again")
+                } else if ourThrottled > 0 {
+                    Button("Restore") { monitor.restoreGroup(group) }
+                        .buttonStyle(.bordered).controlSize(.regular).font(.system(size: ms(10)))
+                } else {
+                    Button("Slow down") { monitor.throttleGroup(group) }
+                        .buttonStyle(.bordered).controlSize(.regular).font(.system(size: ms(10)))
+                }
+                // Quitting from the menu bar, without raising the window: the same
+                // control and the same confirmations as the table, just smaller.
+                QuitMenu(title: group.name, refusal: monitor.quitRefusal(group),
+                         count: group.count, glyphSize: ms(11)) {
+                    monitor.quitGroup(group, mode: $0)
+                }
+            }
         }
     }
 }

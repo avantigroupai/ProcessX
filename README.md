@@ -77,6 +77,23 @@ caps) live in `policy.json` and are loaded by the Node server under `lib/`.
   app's exit via `kqueue` and resumes for it after a `SIGKILL`. Deliberately not
   in the Node build: an HTTP endpoint that can freeze applications is a worse idea
   than a menu item.
+- **Quit / Force Quit (native app only)** — the power menu on a row, for when
+  slowing something down isn't the answer. **Quit** asks: for an app that's
+  `NSRunningApplication.terminate()`, the same request the Dock's Quit sends, so
+  the app runs its own shutdown and can put a save prompt on screen (a bare
+  `SIGTERM` would not — a Cocoa app has no handler for it, so "Quit" would just
+  be Force Quit with a nicer label). Non-app processes get `SIGTERM`. **Force
+  Quit** doesn't ask: `SIGKILL` to every process in the group, unsaved work
+  included. Both confirm in an alert, and Return is unbound on the destructive
+  one. A suspended process is resumed first (it can't answer a quit request while
+  it isn't running) and a capped group has its cap released before being asked;
+  because a request isn't an outcome, the status line checks back and says so if
+  the app is still there. Refused for ProcessX itself, anything ProcessX is
+  running inside, protected system processes and other users' work — but *not*
+  for media/call apps, since the reason QuickFast skips those (it acts on its
+  own) doesn't apply to a button you pressed. Deliberately not in the Node build,
+  for the same reason as the cap: an HTTP endpoint that can kill applications is
+  a worse idea than a menu item.
 - **Persistence** — applied throttles are recorded in `.processx-state.json`
   (with the process's command path, so a reused PID is never mis-restored) and
   survive a server restart. Records for exited processes are pruned

@@ -60,6 +60,25 @@ enum Policy {
         return nil
     }
 
+    /// Why this process may not be *quit*, or nil if it may.
+    ///
+    /// A different shape from `ineligibleReason`, because quitting is a different
+    /// bargain. It is wider in one direction — a media app may be quit, since
+    /// clicking Quit on Spotify is a decision, not a surprise, and the reason
+    /// QuickFast skips media (it acts on its own) doesn't apply to a button you
+    /// pressed. And it is narrower in another: `ancestors` are the processes
+    /// ProcessX is running *inside* (the terminal that launched it, the shell
+    /// under it), and ending one of those ends us mid-action, leaving whatever we
+    /// had suspended suspended.
+    static func quitIneligibleReason(_ p: ProcSample, myUID: uid_t, selfPID: pid_t,
+                                     ancestors: Set<pid_t> = []) -> String? {
+        if p.pid == selfPID || p.pid == 0 { return "it's ProcessX itself" }
+        if ancestors.contains(p.pid) { return "ProcessX is running inside it" }
+        if p.uid != myUID { return "owned by another user (needs admin)" }
+        if critical.contains(p.name) { return "protected system process" }
+        return nil
+    }
+
     /// Why this process may not be *capped*, or nil if it may.
     ///
     /// Strictly narrower than `ineligibleReason`, because a cap suspends rather

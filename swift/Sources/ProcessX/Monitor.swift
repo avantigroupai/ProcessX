@@ -318,6 +318,129 @@ final class Monitor: ObservableObject {
         caps = capper.snapshot()
     }
 
+    // MARK: - quit
+
+    /// The pids between us and launchd. Quitting one of them takes ProcessX down
+    /// with it — most visibly when the app is run from a terminal, where the
+    /// terminal and its shell are ordinary rows in the table like any other.
+    private var selfAncestors: Set<pid_t> {
+        var out: Set<pid_t> = []
+        var cur = selfPID
+        var hops = 0
+        while hops < 40, let p = model.byPID[cur], p.ppid > 1 {
+            out.insert(p.ppid)
+            cur = p.ppid
+            hops += 1
+        }
+        return out
+    }
+
+    /// The processes in this group that may be ended, in the order they'd be asked.
+    private func quitTargets(_ g: ProcGroup) -> [ProcSample] {
+        let ancestors = selfAncestors
+        return g.procs.filter {
+            Policy.quitIneligibleReason($0, myUID: myUID, selfPID: selfPID, ancestors: ancestors) == nil
+        }
+    }
+
+    /// Why this group can't be quit, or nil if it can. Drives the menu's disabled
+    /// state and the refusal message both, so the two can't disagree.
+    func quitRefusal(_ g: ProcGroup) -> String? {
+        if g.isCritical { return "it's a protected system process" }
+        guard quitTargets(g).isEmpty else { return nil }
+        let ancestors = selfAncestors
+        return g.procs.compactMap {
+            Policy.quitIneligibleReason($0, myUID: myUID, selfPID: selfPID, ancestors: ancestors)
+        }.first ?? "nothing in it can be quit"
+    }
+
+    /// True when this one process can be ended — the per-process rows use it to
+    /// choose between a Quit menu and a padlock.
+    func isQuittable(_ p: ProcSample) -> Bool {
+        Policy.quitIneligibleReason(p, myUID: myUID, selfPID: selfPID, ancestors: selfAncestors) == nil
+    }
+
+    func quitGroup(_ g: ProcGroup, mode: Quit.Mode) {
+        if let why = quitRefusal(g) {
+            lastMessage = "Can't quit \(g.name) — \(why)"
+            return
+        }
+        // A capped app spends most of every period suspended. Asking it to quit
+        // in that state is asking a process that isn't running, so the cap goes
+        // first — and a cap on a process that is about to die is dead weight
+        // anyway, holding pids the capper would keep signalling.
+        if isCapped(g.key) {
+            capper.clear(g.key)
+            caps = capper.snapshot()
+        }
+
+        let targets = quitTargets(g)
+        // Asking goes to the roots of the tree — the app process, not its 90
+        // helpers, because an app shuts its own helpers down and asking each of
+        // them separately produces 90 quit requests and one confused browser.
+        // Force quit takes every pid: a killed parent has no chance to take its
+        // children with it, and orphaned helpers keep burning the CPU that
+        // prompted the click.
+        let inGroup = Set(g.procs.map(\.pid))
+        let roots = targets.filter { !inGroup.contains($0.ppid) }
+        let chosen = mode == .ask ? (roots.isEmpty ? targets : roots) : targets
+
+        Audit.log("REQUEST  quit mode=\(mode.rawValue) group=\(g.key) targets=\(chosen.count)")
+        send(mode, to: chosen, label: g.name)
+    }
+
+    /// Quit one process out of an expanded row.
+    func quit(pid: pid_t, mode: Quit.Mode) {
+        guard let p = model.byPID[pid] else {
+            lastMessage = "That process has already exited"
+            return
+        }
+        if let why = Policy.quitIneligibleReason(p, myUID: myUID, selfPID: selfPID, ancestors: selfAncestors) {
+            lastMessage = "Can't quit \(Grouping.label(p)) — \(why)"
+            return
+        }
+        Audit.log("REQUEST  quit mode=\(mode.rawValue) pid=\(pid)")
+        send(mode, to: [p], label: Grouping.label(p))
+    }
+
+    private func send(_ mode: Quit.Mode, to targets: [ProcSample], label: String) {
+        var sent = 0
+        var refusals: [String] = []
+        for p in targets {
+            if let why = Quit.send(pid: p.pid, path: p.path, mode: mode) { refusals.append(why) }
+            else { sent += 1 }
+        }
+
+        guard sent > 0 else {
+            lastMessage = "Couldn't quit \(label) — \(refusals.first ?? "nothing left to quit")"
+            scheduleTick()
+            return
+        }
+        lastMessage = mode == .ask
+            ? "Asked \(label) to quit — it may ask you to save first"
+            : "Force quit \(label) (\(sent) process\(sent == 1 ? "" : "es"))"
+        // Anything we were tracking about a process that is on its way out stops
+        // being true; the next reconcile drops it, this just doesn't wait for it.
+        for p in targets { hotStreak[p.pid] = nil }
+        scheduleTick()
+        verifyQuit(targets.map { ($0.pid, $0.path) }, label: label, mode: mode)
+    }
+
+    /// A request is not an outcome. An app asked to quit may put up a "Save
+    /// changes?" sheet and sit there, or refuse outright — both look identical to
+    /// a button that did nothing, so check back and say which it was.
+    private func verifyQuit(_ targets: [(pid_t, String)], label: String, mode: Quit.Mode) {
+        guard mode == .ask else { return }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard let self else { return }
+            let alive = targets.filter { !Quit.hasExited(pid: $0.0, path: $0.1) }
+            guard !alive.isEmpty else { return }
+            self.lastMessage = "\(label) is still running — it may be waiting on you, "
+                + "or refusing. Force Quit ends it outright."
+        }
+    }
+
     // MARK: - QuickFast
 
     func quickFast() {

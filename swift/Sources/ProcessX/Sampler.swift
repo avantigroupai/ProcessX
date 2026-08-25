@@ -14,6 +14,10 @@ struct ProcSample {
     /// Read before capping: a process someone else suspended must not be adopted,
     /// because releasing the cap would resume something we never stopped.
     var isStopped: Bool = false
+    /// pbi_start_tvsec. A pid alone is not an identity — the kernel recycles
+    /// them, and a browser that churns renderers all day will reuse one. pid +
+    /// start time is the pair that actually names a process.
+    var startedAt: UInt64 = 0
     var groupKey: String = ""
 }
 
@@ -97,7 +101,8 @@ final class Sampler {
                 rss: info.ptinfo.pti_resident_size,
                 priority: info.ptinfo.pti_priority,
                 cpuPct: pct,
-                isStopped: info.pbsd.pbi_status == Self.stoppedStatus
+                isStopped: info.pbsd.pbi_status == Self.stoppedStatus,
+                startedAt: UInt64(info.pbsd.pbi_start_tvsec)
             ))
         }
 

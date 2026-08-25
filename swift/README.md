@@ -1,8 +1,8 @@
 # ProcessX (Swift) — native macOS menu bar app
 
 Live CPU in the menu bar; click for the process list, one-click deprioritize,
-QuickFast, and the Auto-tame watchdog. No subprocesses, no HTTP server, no
-dependencies.
+QuickFast, the Auto-tame watchdog, and Quit / Force Quit. No subprocesses, no
+HTTP server, no dependencies.
 
 ## Build & install
 
@@ -72,7 +72,7 @@ the Trash (settings live in `defaults delete dev.honato.processx`).
 ## Verify
 
 ```sh
-swift run -c release ProcessX --selftest        # 68 checks, real syscalls
+swift run -c release ProcessX --selftest        # 101 checks, real syscalls
 swift run -c release ProcessX --render out.png --dark   # rasterise the UI
 ```
 
@@ -80,7 +80,10 @@ swift run -c release ProcessX --render out.png --dark   # rasterise the UI
 process, throttles it through the same code path a button click uses, and asserts
 the *kernel* moved it to the background band and back. For the cap it runs a real
 SIGSTOP/SIGCONT duty cycle, kills a stand-in parent to prove the guardian resumes
-after a `SIGKILL`, and checks nothing is left suspended afterwards.
+after a `SIGKILL`, and checks nothing is left suspended afterwards. Quit is
+exercised the same way: its own children are ended by `SIGTERM`, one of them
+suspended first (the capped-app case), and one that traps `SIGTERM` to prove
+Force Quit is the rung that always works.
 
 Checks that assert an **absolute CPU percentage** report `SKIP` rather than `FAIL`
 when the machine has more than 1.5 runnable threads per core: a spinning child
@@ -139,6 +142,63 @@ the row shows a one-click link to the Automation settings. Non-scriptable
 browsers (e.g. Firefox) still expand to their renderer processes. See
 `BrowserTabs.swift`.
 
+### Naming a renderer
+
+The renderer half of the row names what it honestly can, and nothing more.
+
+* **Extensions are not tabs.** Chromium runs extensions in renderer processes
+  with the same bundle name, and they were previously all labelled tabs — 13 of
+  36 on a real Chrome. `--extension-process` in the launch arguments is the only
+  thing that separates them (`ProcArgs.swift`, read once per process and cached
+  against `pid + start time`, because pids are recycled).
+* **"Above the background band" is not "on screen".** Chrome demotes a hidden
+  tab's renderer lazily, so the band means *not parked*. Measured: 14 page
+  renderers above the band against 4 tabs actually on screen.
+* So the on-screen tab names are stated **once**, above the rows, where they
+  claim nothing about any single one. A row prints a name only when the
+  arithmetic leaves no choice — one tab on screen and one renderer above the
+  band — a *maybe* when a single on-screen tab has several candidate renderers,
+  and a shortlist only when the visible rows do not outnumber the on-screen
+  tabs. `BrowserProcs.rowName` decides this, and `--selftest` pins every branch.
+
+## Quit and Force Quit
+
+The power menu on a row ends a process instead of slowing it — the one action
+here with no way back, which is why it is two rungs and not one.
+
+**Quit** asks. For anything macOS knows as an application that is
+`NSRunningApplication.terminate()`, the same request the Dock's Quit sends, so
+the app runs its own shutdown: a "Save changes?" sheet appears and the app
+decides when to go. A signal would not do this — a Cocoa app has no `SIGTERM`
+handler, so the default disposition just ends it, unsaved work and all, and
+"Quit" would be a second Force Quit wearing a friendlier label. Non-app
+processes (daemons, CLI sessions) do get `SIGTERM`, which is the same bargain
+for them. Asking goes to the roots of the process tree, not to all 90 helpers:
+an app shuts its own helpers down.
+
+**Force Quit** doesn't ask — `SIGKILL`, every pid in the group, because a killed
+parent has no chance to take its children with it. Unsaved work is gone. Return
+is unbound on that alert so a stray keypress can't take it.
+
+Three details that are the difference between working and looking like it works:
+
+- A **suspended process never runs**, so it can neither see a `SIGTERM` nor
+  answer a quit event. Quit sends `SIGCONT` first, and quitting a capped group
+  releases its cap before asking — otherwise capped apps would silently ignore
+  the button.
+- **A request is not an outcome.** An app asked to quit may put up a save sheet,
+  or refuse outright; both look exactly like a button that did nothing. The
+  status line checks back a few seconds later and says which it was.
+- **Identity is re-read immediately before signalling**, same guard as the cap:
+  a sample is up to two seconds old, and killing the wrong process because a pid
+  was recycled has no Restore afterwards.
+
+Refused outright: ProcessX itself, anything ProcessX is running *inside* (the
+terminal that launched it, and the shell under it — ending one of those takes us
+down mid-action), protected system processes, and other users' processes. Media
+and call apps are *not* refused: QuickFast skips them because it acts on its own,
+and a button you pressed is a decision, not a surprise.
+
 ## Safety
 
 - Never touches: the frontmost app (including a CLI in the frontmost terminal),
@@ -149,6 +209,9 @@ browsers (e.g. Firefox) still expand to their renderer processes. See
 - Records are identity-guarded by executable path, so a recycled PID is never
   acted on.
 - Auto-tame is **off** by default.
+- **Quit / Force Quit** never touch ProcessX, its own ancestors, protected
+  system processes, or another user's work; Force Quit confirms in an alert
+  where Return is unbound.
 - The **hard CPU cap** is the one action that suspends, so it is gated harder
   than the rest: no override for media and call apps, no terminals or shells,
   nothing already suspended by something else, never the foreground group, and

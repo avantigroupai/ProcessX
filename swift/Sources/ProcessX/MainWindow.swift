@@ -616,6 +616,9 @@ struct BigGroupRow: View {
                     .buttonStyle(.glass).font(.system(size: UI.caption))
                 }
                 capMenu
+                QuitMenu(title: group.name, refusal: monitor.quitRefusal(group), count: group.count) {
+                    monitor.quitGroup(group, mode: $0)
+                }
             }
         }
     }
@@ -693,8 +696,15 @@ struct BigGroupRow: View {
                        count: b.renderers.count, accent: accent,
                        cpu: b.rendererCPU, mem: b.rendererMem)
 
+            let onScreen = BrowserProcs.onScreen(tabs: monitor.browserTabs[group.name], shared: b.shared)
+            if case .several(let titles) = onScreen {
+                OnScreenRow(titles: titles)
+            }
+            let rowName = BrowserProcs.rowName(onScreen: onScreen, visibleRenderers: b.visibleCount)
             ForEach(b.renderers.prefix(Self.rendererLimit), id: \.pid) { p in
-                RendererRow(proc: p, monitor: monitor, accent: accent)
+                RendererRow(proc: p, monitor: monitor, accent: accent,
+                            isExtension: b.extensionPIDs.contains(p.pid),
+                            name: rowName)
             }
             if b.renderers.count > Self.rendererLimit {
                 let rest = b.renderers.dropFirst(Self.rendererLimit)
@@ -703,25 +713,41 @@ struct BigGroupRow: View {
                           mem: rest.reduce(0) { $0 + $1.rss })
             }
             if b.supportCount > 0 {
-                RollupRow(text: "Support processes (GPU, networking, extensions) ×\(b.supportCount)",
+                RollupRow(text: "Support processes (GPU, networking, utilities) ×\(b.supportCount)",
                           cpu: b.supportCPU, mem: b.supportMem)
             }
-            TabsInfoRow(text: rendererNote(b), wraps: true)
+            TabsInfoRow(text: rendererNote(b, onScreen: onScreen), wraps: true)
         }
     }
 
     private static let rendererLimit = 8
 
-    private func rendererNote(_ b: BrowserProcs.Breakdown) -> String {
+    private func rendererNote(_ b: BrowserProcs.Breakdown, onScreen: BrowserProcs.OnScreen) -> String {
         if b.shared {
             return "macOS reparents WebKit page processes away from Safari and shares them "
                  + "with every app that shows web content, so these aren't all Safari's — "
                  + "and none of them can be traced back to a named tab."
         }
-        return "\(b.visibleCount) of \(b.renderers.count) renderers serve tabs that are on "
-             + "screen; the browser parks the rest in the background band. macOS can't say "
-             + "which tab a renderer belongs to, and \(group.name) shares one renderer "
-             + "across same-site tabs — so a hot renderer narrows it down, it doesn't name it."
+        var parts = ["\(b.visibleCount) of \(b.tabRenderers.count) page renderers sit above the "
+                   + "background band, where the browser parks the renderers of hidden tabs."]
+        if b.extensionCount > 0 {
+            parts.append("\(b.extensionCount) more run extensions rather than any tab.")
+        }
+        // The gap between "above the band" and "on screen" is the whole caveat,
+        // so state it in numbers the reader can check against the rows above.
+        switch onScreen {
+        case .unknown: break
+        case .one(let title):
+            parts.append("\u{201C}\(title)\u{201D} is the only tab on screen.")
+        case .several(let titles):
+            parts.append("Only \(titles.count) tabs are on screen, though: the band means "
+                       + "\u{201C}not parked\u{201D} rather than \u{201C}visible\u{201D}, because "
+                       + "\(group.name) demotes a hidden tab's renderer lazily.")
+        }
+        parts.append("macOS won't map a renderer to a tab, and \(group.name) shares one renderer "
+                   + "across same-site tabs — so a hot renderer narrows it down; only a lone tab "
+                   + "on screen names it.")
+        return parts.joined(separator: " ")
     }
 }
 
@@ -765,12 +791,16 @@ private struct SectionRow: View {
     }
 }
 
-/// One renderer. No name to give it — the pill and the numbers are everything
-/// we actually know.
+/// One renderer. The numbers are measured; the name, when there is one, is
+/// inferred — a renderer above the background band is serving a tab that's on
+/// screen, so with a single tab on screen there is only one name it can have.
+/// Everything past that is a shortlist, and the row prints it as one.
 private struct RendererRow: View {
     var proc: ProcSample
     @ObservedObject var monitor: Monitor
     var accent: Color
+    var isExtension = false
+    var name: BrowserProcs.RowName = .none
     @State private var hovering = false
 
     var body: some View {
@@ -782,11 +812,14 @@ private struct RendererRow: View {
                 if monitor.isThrottledByUs(proc.pid) {
                     Pill(text: monitor.origin(proc.pid) == .auto ? "auto-slowed" : "slowed",
                          tone: .accent, accent: accent)
+                } else if isExtension {
+                    Pill(text: "extension", tone: .neutral, accent: accent)
                 } else if BrowserProcs.isVisible(proc) {
                     Pill(text: "visible tab", tone: .green, accent: accent)
                 } else {
                     Pill(text: "background tab", tone: .neutral, accent: accent)
                 }
+                if BrowserProcs.isVisible(proc), !isExtension { nameLabel }
             }
             .padding(.leading, 60).frame(maxWidth: .infinity, alignment: .leading)
 
@@ -794,7 +827,8 @@ private struct RendererRow: View {
             Text(fmtBytes(proc.rss)).font(.system(size: UI.caption)).monospacedDigit()
                 .foregroundStyle(.secondary).frame(width: 100, alignment: .trailing)
             Spacer().frame(width: 132)
-            Group {
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
                 if monitor.isThrottledByUs(proc.pid) {
                     Button("Restore") { monitor.restore(pids: [proc.pid]) }
                         .buttonStyle(.glass).font(.system(size: UI.chip))
@@ -805,15 +839,97 @@ private struct RendererRow: View {
                         .buttonStyle(.glass).font(.system(size: UI.chip))
                         .opacity(hovering ? 1 : 0.55)
                 }
+                // Ending one renderer closes the pages it serves — the browser
+                // survives and shows its own crashed-tab placeholder.
+                if monitor.isQuittable(proc) {
+                    QuitMenu(title: "Renderer \(proc.pid)", glyphSize: UI.caption) {
+                        monitor.quit(pid: proc.pid, mode: $0)
+                    }
+                    .opacity(hovering ? 1 : 0.55)
+                }
             }
             .frame(width: 150, alignment: .trailing)
         }
         .padding(.horizontal, 22).frame(height: 36)
         .background(hovering ? Color.primary.opacity(0.05) : Color.primary.opacity(0.02))
         .onHover { hovering = $0 }
-        .help(BrowserProcs.isVisible(proc)
-              ? "Serving a tab that's currently on screen. PID \(proc.pid)"
-              : "Serving hidden tabs — the browser has parked it in the background band. PID \(proc.pid)")
+        .help(rowHelp)
+    }
+
+    /// The inferred half of the row, kept quieter than the measured half: dim,
+    /// single-line, and truncating rather than pushing the numbers around.
+    @ViewBuilder private var nameLabel: some View {
+        switch name {
+        case .none:
+            EmptyView()
+        case .name(let title):
+            Text(title)
+                .font(.system(size: UI.caption)).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.tail)
+        case .maybe(let title):
+            Text("maybe \(title)")
+                .font(.system(size: UI.caption)).foregroundStyle(.tertiary)
+                .lineLimit(1).truncationMode(.tail)
+        case .oneOf(let k):
+            Text("1 of \(k) on screen")
+                .font(.system(size: UI.chip)).foregroundStyle(.tertiary).lineLimit(1)
+        }
+    }
+
+    /// Hovering is where the caveat belongs — the row has to stay scannable, but
+    /// nobody should act on an inferred name without being told it's inferred.
+    private var rowHelp: String {
+        if isExtension {
+            return "An extension's process, not a tab — Chrome runs extensions in renderers too. "
+                 + "PID \(proc.pid)"
+        }
+        guard BrowserProcs.isVisible(proc) else {
+            return "Parked in the background band, where the browser puts renderers for hidden "
+                 + "tabs. PID \(proc.pid)"
+        }
+        switch name {
+        case .none, .oneOf:
+            return "Above the background band, so it hasn't been parked as a hidden tab. That is "
+                 + "not the same as being on screen — the browser demotes a hidden tab's renderer "
+                 + "lazily. PID \(proc.pid)"
+        case .name(let title):
+            return "\u{201C}\(title)\u{201D} is the only tab on screen and this is the only renderer "
+                 + "above the background band, so it is almost certainly serving it. Almost: a "
+                 + "hidden tab playing media also sits above the band. PID \(proc.pid)"
+        case .maybe(let title):
+            return "\u{201C}\(title)\u{201D} is the only tab on screen, and this is one of several "
+                 + "renderers that could be serving it. macOS won't say which. PID \(proc.pid)"
+        }
+    }
+}
+
+/// The names, stated once, where they claim nothing about any single row: these
+/// are the tabs you can actually see, and the hot renderer above is serving one
+/// of them — or a tab you closed the view of a minute ago.
+private struct OnScreenRow: View {
+    let titles: [String]
+
+    private var line: String {
+        // Long enough that a page title stays recognisable, short enough that one
+        // verbose tab can't push the others off the line.
+        let shown = titles.prefix(6).map { $0.count > 60 ? String($0.prefix(59)) + "\u{2026}" : $0 }
+        let more = titles.count > 6 ? " · +\(titles.count - 6) more" : ""
+        return "On screen now: " + shown.joined(separator: " · ") + more
+    }
+
+    // Laid out like the caption rather than like a row: a leading glyph in an
+    // HStack pins the text to one line, and the whole point of this line is that
+    // it wraps rather than hiding the last name behind an ellipsis.
+    var body: some View {
+        Text(line)
+            .font(.system(size: UI.chip)).foregroundStyle(.tertiary)
+            .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 60).padding(.trailing, 120).padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: 30)
+            .background(Color.primary.opacity(0.02))
+        .help("The active tab of each browser window. One of the renderers below is serving each "
+              + "of them; macOS won't say which.")
     }
 }
 
@@ -850,7 +966,7 @@ private struct TabRow: View {
     var body: some View {
         HStack(spacing: 9) {
             glyph("globe", UI.caption).foregroundStyle(.secondary).frame(width: 16)
-            Text(tab.title.isEmpty ? "Untitled" : tab.title)
+            Text(tab.displayName)
                 .font(.system(size: UI.caption)).lineLimit(1)
             if !tab.host.isEmpty {
                 Text(tab.host).font(.system(size: UI.chip)).foregroundStyle(.tertiary).lineLimit(1)
@@ -863,7 +979,7 @@ private struct TabRow: View {
             }
             .buttonStyle(.glass)
             .opacity(hovering ? 1 : 0)
-            .accessibilityLabel("Switch to tab \(tab.title)")
+            .accessibilityLabel("Switch to tab \(tab.displayName)")
         }
         .padding(.leading, 60).padding(.trailing, 22).frame(height: 36)
         .contentShape(Rectangle())
@@ -972,7 +1088,8 @@ private struct BigChildRow: View {
             Text(fmtBytes(proc.rss)).font(.system(size: UI.caption)).monospacedDigit().foregroundStyle(.secondary)
                 .frame(width: 100, alignment: .trailing)
             Spacer().frame(width: 132)
-            Group {
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
                 if monitor.isThrottledByUs(proc.pid) {
                     Button("Restore") { monitor.restore(pids: [proc.pid]) }
                         .buttonStyle(.glass).font(.system(size: UI.chip))
@@ -981,6 +1098,12 @@ private struct BigChildRow: View {
                 } else {
                     Button("Slow") { monitor.throttle(pids: [proc.pid], origin: .manual, manual: true) }
                         .buttonStyle(.glass).font(.system(size: UI.chip))
+                }
+                if monitor.isQuittable(proc) {
+                    QuitMenu(title: proc.name, glyphSize: UI.caption) {
+                        monitor.quit(pid: proc.pid, mode: $0)
+                    }
+                    .opacity(hovering ? 1 : 0.55)
                 }
             }
             .frame(width: 150, alignment: .trailing)
@@ -994,6 +1117,75 @@ private struct BigChildRow: View {
     private var childTooltip: String {
         let i = ProcessCatalog.describe(label: Grouping.label(proc), path: proc.path)
         return "\(i.title)\n\(i.detail)\nPID \(proc.pid)"
+    }
+}
+
+/// Quit / Force Quit, in one place because the wording is the feature.
+///
+/// Every row that can end something uses this — an app row, a helper inside it, a
+/// browser renderer — so the promise made in the confirmation is identical
+/// wherever it is made, and the two rungs can't drift into sounding alike. It
+/// lives behind a menu for the same reason a cap does, and more so: a cap is
+/// released, a throttle is restored, and this one has no way back.
+struct QuitMenu: View {
+    /// What the items and the dialog name — an app, or one process inside it.
+    let title: String
+    /// Non-nil when it can't be quit: the menu says why instead of offering it.
+    var refusal: String?
+    /// How many processes a force quit would take with it.
+    var count: Int = 1
+    var glyphSize: CGFloat = UI.body
+    let action: (Quit.Mode) -> Void
+
+    var body: some View {
+        Menu {
+            Button("Quit \(title)…") { confirm(.ask) }
+            Button("Force Quit \(title)…", role: .destructive) { confirm(.force) }
+            if let refusal {
+                Divider()
+                Text("Can't quit — \(refusal)")
+            }
+        } label: {
+            glyph("power", glyphSize).foregroundStyle(.secondary)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(refusal != nil)
+        .help(refusal.map { "Can't quit \(title) — \($0)" }
+              ?? "Quit asks \(title) to close, so it can save first. Force Quit ends it immediately and unsaved work is lost. Neither is undone by Restore.")
+    }
+
+    /// An NSAlert rather than a SwiftUI `confirmationDialog`, because this control
+    /// also lives in the menu-bar popover: that panel closes the moment it stops
+    /// being key, and a dialog anchored to it goes with it — leaving a destructive
+    /// action one unconfirmed click away. An app-modal alert is its own window and
+    /// outlives the thing that opened it.
+    private func confirm(_ mode: Quit.Mode) {
+        let alert = NSAlert()
+        alert.alertStyle = mode == .force ? .critical : .warning
+        alert.messageText = mode == .force ? "Force quit \(title)?" : "Quit \(title)?"
+        alert.informativeText = mode == .force
+            ? """
+              \(count == 1 ? "The process is" : "All \(count) of its processes are") killed immediately. \
+              Unsaved work is lost, nothing gets a chance to close its files, and no Restore brings it back.
+              """
+            : """
+              \(title) is asked to quit the same way the Dock asks it. It can put a save prompt on screen \
+              first, and it can decline — if it's still running afterwards, Force Quit ends it outright.
+              """
+        alert.addButton(withTitle: mode.verb)
+        alert.buttons.first?.hasDestructiveAction = mode == .force
+        alert.addButton(withTitle: "Cancel")
+        if mode == .force {
+            // Return must never kill anything: on the destructive rung the safe
+            // answer takes the default key, and Escape already belongs to Cancel.
+            alert.buttons[0].keyEquivalent = ""
+            alert.buttons[1].keyEquivalent = "\r"
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { action(mode) }
     }
 }
 
