@@ -1007,7 +1007,16 @@ private struct TabRow: View {
             if !tab.host.isEmpty {
                 Text(tab.host).font(.system(size: UI.chip)).foregroundStyle(.tertiary).lineLimit(1)
             }
-            if tab.active { Pill(text: "frontmost", tone: .accent, accent: accent) }
+            // "frontmost" can only be true of one tab, but `active` is per
+            // window — the script marks the active tab of every window, so four
+            // open windows put the badge on four different tabs at once. Window
+            // 1 is the front window in AppleScript's ordering, so only its
+            // active tab gets the strong word; the rest are merely on screen,
+            // which is what they are.
+            if tab.active {
+                Pill(text: tab.windowIndex == 1 ? "frontmost" : "on screen",
+                     tone: .accent, accent: accent)
+            }
             Spacer(minLength: 12)
             Button { monitor.jumpToTab(tab, appName: appName) } label: {
                 HStack(spacing: 4) { glyph("arrow.up.forward", UI.chip); Text("Jump") }
