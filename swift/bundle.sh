@@ -46,8 +46,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIdentifier</key><string>dev.honato.processx</string>
   <key>CFBundleExecutable</key><string>ProcessX</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.2.2</string>
-  <key>CFBundleVersion</key><string>1.2.2</string>
+  <key>CFBundleShortVersionString</key><string>1.2.3</string>
+  <key>CFBundleVersion</key><string>1.2.3</string>
   <!-- Liquid Glass requires macOS 26. -->
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <!-- No LSUIElement: this is a real windowed app with a Dock icon.
