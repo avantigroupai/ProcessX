@@ -115,6 +115,8 @@ struct MenuContent: View {
             Toggle("System", isOn: $monitor.showSystem).toggleStyle(.checkbox)
             Toggle("Auto-tame", isOn: $monitor.autoTame).toggleStyle(.checkbox)
                 .help("Automatically slow any background process that stays above \(Int(monitor.cpuThreshold))% of a core for ~6s (e.g. a greedy ffmpeg encode). Bringing it to the front restores it instantly.")
+            Toggle("Notify on hogs", isOn: $monitor.notifySlowProcesses).toggleStyle(.checkbox)
+                .help("When a background process stays above \(Int(monitor.cpuThreshold))% of a core, send a notification offering to Cap or Slow Down it — with the difference explained right there. On by default.")
         }
         .font(.system(size: ms(11)))
         .padding(.horizontal, ms(12)).padding(.vertical, ms(7))

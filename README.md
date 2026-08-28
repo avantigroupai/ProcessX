@@ -63,6 +63,19 @@ caps) live in `policy.json` and are loaded by the Node server under `lib/`.
   the foreground restores it instantly (focus rescue), and a manually restored
   process gets a 10-minute cooldown so the watchdog never fights you. The same
   protected/media/foreground exclusions as QuickFast apply.
+- **Slow-hog alerts (native app only, on by default)** — the interactive
+  counterpart to Auto-tame: instead of quietly reprioritizing a hog, ProcessX
+  asks. When a background app group stays above the CPU threshold for the same
+  ~8 s streak Auto-tame uses, it sends a macOS notification naming the app, with
+  **Slow Down** and **Cap** action buttons and the tradeoff spelled out right in
+  the notification body — Slow Down is the gentler, always-reversible priority
+  change; Cap is the stronger hard ceiling that works by suspending and
+  resuming the app, which can stutter a live connection while paused. Either
+  button acts immediately, no window or popover needs to be open. A group
+  Auto-tame already grabbed silently never reaches this (no double-handling),
+  and answering — or ignoring — an alert starts a 10-minute cooldown before the
+  same group can alert again. Turn it off with "Notify on hogs" in the window's
+  controls bar or the menu-bar popover.
 - **Hard CPU cap (native app only, opt-in)** — set from the speedometer menu on
   an app row: "Cap at 25% of a core" holds that app's whole process group under the
   number. This is the one action that *suspends*: macOS exposes no per-process

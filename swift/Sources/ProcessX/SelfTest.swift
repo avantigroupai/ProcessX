@@ -915,6 +915,82 @@ enum SelfTest {
                  "could not read our own code signature")
         }
 
+        print("\n[slow-process alert] asks instead of silently taming, once a group has been hot for a streak")
+        MainActor.assumeIsolated {
+            let m = Monitor()
+            m.notifySlowProcesses = false   // drive slowProcessCandidates() by hand, one call per assertion
+            m.autoTame = false
+            m.cpuThreshold = 25
+
+            // Detached the same way the cap-via-Monitor test does: a plain child of
+            // this process would land inside the frontmost terminal's CLI session
+            // (`isFront` would then wrongly exclude it), so it's reparented to
+            // launchd via a shell that exits immediately.
+            let spawn = Process()
+            spawn.executableURL = URL(fileURLWithPath: "/bin/sh")
+            spawn.arguments = ["-c", "/usr/bin/yes > /dev/null 2>&1 & echo $!"]
+            let pipe = Pipe()
+            spawn.standardOutput = pipe
+            do {
+                try spawn.run()
+                let out = pipe.fileHandleForReading.readDataToEndOfFile()
+                spawn.waitUntilExit()
+                guard let pid = pid_t(String(decoding: out, as: UTF8.self)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                    check("spawned a detached burner", false, "no pid on stdout"); return
+                }
+                Thread.sleep(forTimeInterval: 0.6)
+                m.tick()   // first sample of a never-before-seen pid: no prior total to diff against, cpuPct reads 0
+                Thread.sleep(forTimeInterval: 0.6)
+                m.tick()   // now there's an interval to measure
+
+                guard let key = m.model.byPID[pid]?.groupKey, let g = m.model.group(for: key) else {
+                    check("detached burner is in the model", false)
+                    _ = kill(pid, SIGCONT); _ = kill(pid, SIGTERM)
+                    return
+                }
+                check("burner reads hot enough to qualify", g.cpu >= m.cpuThreshold, "\(g.cpu)%")
+                check("burner's group isn't the frontmost app", !m.model.isFront(key))
+
+                check("1st look: below the streak, no alert yet", m.slowProcessCandidates().isEmpty)
+                check("2nd look: still below the streak", m.slowProcessCandidates().isEmpty)
+                let third = m.slowProcessCandidates()
+                check("3rd look: streak reached, alert fires", third.contains { $0.key == key })
+
+                // Cooldown is set by `slowProcessWatchTick`, the private caller that
+                // actually sends the alert — not by `slowProcessCandidates` itself,
+                // which stays pure so it can be probed directly like above. Go
+                // through the real `tick()` path once to exercise it for real.
+                m.notifySlowProcesses = true
+                m.tick()
+                m.notifySlowProcesses = false
+                check("immediately after: cooling down, not re-alerted", m.slowProcessCandidates().isEmpty)
+
+                print("\n[slow-process alert] notification actions reach the same code the buttons use")
+                check("not yet slowed or capped", !m.isThrottledByUs(pid) && !m.isCapped(key))
+                m.slowDownFromAlert(key: key)
+                check("Slow Down action throttles it", m.isThrottledByUs(pid))
+                m.restore(pids: [pid])
+                check("restore undoes it", !m.isThrottledByUs(pid))
+
+                m.capFromAlert(key: key)
+                check("Cap action caps it", m.isCapped(key))
+                check("Cap action counts as the explainer having been shown", m.capAcknowledged)
+                check("caps at the documented default", m.cap(forKey: key)?.percent == Monitor.alertCapPercent)
+                m.clearCap(key: key, name: g.name)
+                Thread.sleep(forTimeInterval: 0.5)
+                check("clearing releases it", !m.isCapped(key))
+
+                check("a vanished group is a no-op, not a crash",
+                      { m.slowDownFromAlert(key: "gone"); m.capFromAlert(key: "gone"); return true }())
+
+                _ = kill(pid, SIGCONT)
+                _ = kill(pid, SIGTERM)
+            } catch {
+                check("spawn slow-process alert test child", false, "\(error)")
+            }
+        }
+
         print("\n[system] memory / GPU / frontmost via system APIs")
         let mem = SystemStats.memory()
         check("physical memory read", mem.total > 0, "\(mem.total / 1_073_741_824) GB")

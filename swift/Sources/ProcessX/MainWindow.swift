@@ -199,6 +199,8 @@ struct MainWindow: View {
             Toggle("System", isOn: $monitor.showSystem).toggleStyle(.switch).font(.system(size: UI.caption))
             Toggle("Auto-tame", isOn: $monitor.autoTame).toggleStyle(.switch).font(.system(size: UI.caption))
                 .help("Automatically slow any background process that stays above \(Int(monitor.cpuThreshold))% of a core for ~6–8s (e.g. a greedy ffmpeg encode). Bringing it to the front restores it instantly.")
+            Toggle("Notify on hogs", isOn: $monitor.notifySlowProcesses).toggleStyle(.switch).font(.system(size: UI.caption))
+                .help("When a background process stays above \(Int(monitor.cpuThreshold))% of a core, send a notification offering to Cap or Slow Down it — with the difference explained right there. On by default.")
 
             Spacer()
             Text(monitor.lastMessage ?? "\(monitor.visibleGroups.count) apps")

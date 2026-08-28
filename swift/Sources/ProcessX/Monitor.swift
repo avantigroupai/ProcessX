@@ -120,6 +120,12 @@ final class Monitor: ObservableObject {
     /// `autoStreak` consecutive samples, so brief spikes are never punished.
     @AppStorage("autoTame") var autoTame = false
     @AppStorage("cpuThreshold") var cpuThreshold: Double = 25
+    /// Slow-hog alerts: when a background app group stays hot, ask instead of
+    /// silently acting — a system notification offering Cap or Slow down. On by
+    /// default, unlike Auto-tame, because asking first is the safer default and
+    /// a group Auto-tame already grabbed never reaches this (see `alreadyHandled`
+    /// in `slowProcessCandidates`).
+    @AppStorage("notifySlowProcesses") var notifySlowProcesses = true
     @AppStorage("theme") var themeName: String = AppTheme.liquidGlass.rawValue
     /// Whether the "a cap suspends the app" explainer has been shown and accepted.
     @AppStorage("capAcknowledged") var capAcknowledged = false
@@ -139,6 +145,27 @@ final class Monitor: ObservableObject {
     /// Coalesce back-to-back action samples (throttle then UI refresh) into one tick.
     private var tickCoalescePending = false
 
+    private let alertStreak = 3
+    private let alertCooldown: TimeInterval = 600
+    private var alertHotStreak: [String: Int] = [:]
+    private var alertCooldownUntil: [String: Date] = [:]
+    private var alerter: SlowProcessAlerter?
+
+    /// Whether the OS notification bridge must stay off: either a CLI path that
+    /// already does its own headless thing (selftest, bench, render, the cap
+    /// guardian — these must never trigger a real permission prompt or an actual
+    /// banner, or `--selftest` would fire one on every run), or `.build/debug/
+    /// ProcessX` run straight off the command line rather than as `ProcessX.app`.
+    /// `UNUserNotificationCenter.current()` requires a real bundle identifier —
+    /// there is none outside a proper `.app`, and calling it anyway throws. Only
+    /// the bundled app stands up the bridge.
+    private static var skipsNotificationBridge: Bool {
+        let flags: Set<String> = ["--selftest", "--bench", "--bench-view", "--bench-live",
+                                   "--render", "--cap-guardian"]
+        if !flags.isDisjoint(with: Set(CommandLine.arguments)) { return true }
+        return Bundle.main.bundleIdentifier == nil
+    }
+
     init() {
         // Before anything else can be suspended: let go of anything a previous run
         // died holding, and arm the handlers that resume on the way out.
@@ -148,6 +175,10 @@ final class Monitor: ObservableObject {
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in
             self?.capper.clearAllSync()
+        }
+
+        if !Self.skipsNotificationBridge {
+            alerter = SlowProcessAlerter(monitor: self)
         }
 
         tick()
@@ -253,6 +284,10 @@ final class Monitor: ObservableObject {
         menuBar.text = sampler.hasBaseline ? "\(Int(lastCPU.rounded()))%" : "–"
 
         if autoTame { autoTameTick() }
+        // Runs after autoTameTick: a group Auto-tame just grabbed already shows
+        // `throttledByUs > 0` by this point, so it can never also trigger an
+        // alert on the same tick — no separate mutual-exclusion check needed.
+        if notifySlowProcesses { slowProcessWatchTick() }
 
         // Below this line everything notifies SwiftUI, and a notification means a
         // full window rebuild — ~90% of what this app costs. With nothing on
@@ -625,6 +660,78 @@ final class Monitor: ObservableObject {
             throttled = store.all.sorted { $0.at > $1.at }
             lastMessage = "Auto-tamed \(Array(Set(applied)).sorted().joined(separator: ", "))"
         }
+    }
+
+    // MARK: - slow-process alerts
+
+    /// App groups worth interrupting the user about: hot for `alertStreak`
+    /// consecutive samples, not the app in front, not system/critical, not
+    /// already handled (by us or by Auto-tame), and not still cooling down from
+    /// a previous alert. Grouped rather than per-process, because both actions
+    /// on offer — Cap and Slow down — already act on the whole group.
+    ///
+    /// Pure and side-effect-free so it can be exercised directly from tests
+    /// without touching `UNUserNotificationCenter`.
+    func slowProcessCandidates() -> [ProcGroup] {
+        let now = Date()
+        var seen = Set<String>()
+        var candidates: [ProcGroup] = []
+
+        for g in model.groups {
+            seen.insert(g.key)
+            let cooling = (alertCooldownUntil[g.key].map { now < $0 }) ?? false
+            let alreadyHandled = g.throttledByUs > 0 || isCapped(g.key)
+            let hot = g.cpu >= cpuThreshold
+                && g.actionable
+                && !model.isFront(g.key)
+                && !alreadyHandled
+                && !cooling
+            guard hot else { alertHotStreak[g.key] = nil; continue }
+            let streak = (alertHotStreak[g.key] ?? 0) + 1
+            alertHotStreak[g.key] = streak
+            if streak >= alertStreak { candidates.append(g) }
+        }
+
+        alertHotStreak = alertHotStreak.filter { seen.contains($0.key) }
+        alertCooldownUntil = alertCooldownUntil.filter { $0.value > now }
+        return candidates
+    }
+
+    private func slowProcessWatchTick() {
+        for g in slowProcessCandidates() {
+            // Cooldown starts the moment the alert goes out, whether or not the
+            // user ever answers it — otherwise an ignored notification would fire
+            // again on the very next tick.
+            alertCooldownUntil[g.key] = Date().addingTimeInterval(alertCooldown)
+            Audit.log("ALERT    key=\(g.key) name=\(g.name) cpu=\(String(format: "%.1f", g.cpu))")
+            alerter?.alert(key: g.key, name: g.name, cpuPercent: g.cpu, offerCap: capRefusal(g) == nil)
+        }
+    }
+
+    /// The percentage a "Cap" notification action applies — the same default the
+    /// speedometer menu leads with.
+    static let alertCapPercent: Double = 25
+
+    /// Reached from the notification's "Slow Down" button, which can fire with no
+    /// window or popover open. The group may have changed shape or vanished by
+    /// the time the user answers, so it's re-resolved by key rather than trusting
+    /// what the alert was built from.
+    func slowDownFromAlert(key: String) {
+        guard let g = model.group(for: key) else { return }
+        throttleGroup(g)
+    }
+
+    /// Reached from the notification's "Cap" button. The notification body
+    /// already spelled out how a cap differs from Slow down before the user
+    /// picked it, so this counts as the one-time explainer having been shown.
+    func capFromAlert(key: String) {
+        guard let g = model.group(for: key) else { return }
+        guard capRefusal(g) == nil else {
+            lastMessage = "Couldn't cap \(g.name) — it changed before you answered"
+            return
+        }
+        capAcknowledged = true
+        setCap(g, percent: Self.alertCapPercent)
     }
 
     // MARK: - view helpers
