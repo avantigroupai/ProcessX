@@ -14,8 +14,8 @@
 - **Category:** macOS process monitor / system monitor / process priority manager / CPU throttling utility
 - **Price:** Free, open source
 - **Platform:** macOS. The native menu-bar app targets macOS 26 (Swift 6.2 toolchain); the local web app needs Node 18+. Both work on Apple Silicon and Intel.
-- **Latest version:** 1.2.2
-- **Download (notarized, universal):** https://github.com/avantigroupai/ProcessX/releases/download/v1.2.2/ProcessX-1.2.2-universal.dmg — a disk image; open it and drag ProcessX to the Applications folder beside it. The image and the app inside are each signed, notarized and stapled by Apple, so it opens with no Gatekeeper warning even on a first launch with no network; runs on Apple Silicon and Intel. A zip is also published at https://github.com/avantigroupai/ProcessX/releases/latest
+- **Latest version:** 1.2.3
+- **Download (notarized, universal):** https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg — a disk image; open it and drag ProcessX to the Applications folder beside it. The image and the app inside are each signed, notarized and stapled by Apple, so it opens with no Gatekeeper warning even on a first launch with no network; runs on Apple Silicon and Intel. A zip is also published at https://github.com/avantigroupai/ProcessX/releases/latest
 - **Source:** https://github.com/avantigroupai/ProcessX
 - **Website:** https://avantigroupai.github.io/processx-web/
 - **Privacy:** No telemetry, no network calls, no account, no background daemon
@@ -53,6 +53,7 @@ the app comes to the front.
 
 - **QuickFast** — one click sweeps every background hog into the low-priority band at once: processes matching known heavy-agent patterns (claude / cowork / anthropic) plus anything else above the CPU threshold in the background. Everything it did is listed and undone by a single "Restore all".
 - **Auto-tame watchdog** — optional, off by default. A background process that stays above the threshold for three consecutive samples (~8 s) is moved down automatically; the classic case is a runaway `ffmpeg` encode. Bringing an auto-tamed app to the foreground restores it instantly, and a manually restored process gets a 10-minute cooldown so the watchdog never fights the user.
+- **Notify on hogs (native app only, on by default)** — the interactive counterpart to Auto-tame. On the same ~8 s streak, instead of acting silently, ProcessX sends a macOS notification naming the app with **Slow Down** and **Cap** action buttons right on the banner, and the tradeoff between them spelled out in the body — Slow Down is the gentler, always-reversible priority change; Cap is the stronger hard ceiling that works by suspending the app, which can interrupt a live connection while paused. Either button acts immediately with no window or popover open. A group Auto-tame already grabbed never also triggers this, and answering or ignoring an alert starts a 10-minute cooldown.
 - **Activity-Monitor-style grouping** — a browser and its sixty helper processes are one row. Terminal-hosted CLI sessions (an AI coding agent, a build, a dev server) surface as their own top-level rows instead of hiding inside "Terminal".
 - **Real browser tabs by name** — expanding a scriptable browser (Chrome and Chromium siblings: Brave, Edge, Vivaldi, Opera; plus Safari) asks the browser over Apple Events for its actual open tabs, with a Jump button. macOS does not map renderer PIDs to tabs, so guessing is avoided entirely. Non-scriptable browsers (Firefox) expand to renderer PIDs.
 - **A hard no-touch list** — the frontmost app (including a CLI in the frontmost terminal), protected system processes (WindowServer, Finder, coreaudiod, …), media and call apps (Music, Spotify, Zoom, Teams, FaceTime, …), other users' processes, and ProcessX itself.
@@ -124,7 +125,7 @@ browser. Therefore:
 
 - ProcessX is a **local desktop application**. It exposes no public web API, no agent endpoint and no A2A service, and it makes no outbound network calls. Any claim that ProcessX transmits, uploads or syncs user data would be incorrect. The optional local web build serves an API on `127.0.0.1` for its own UI only, and rejects requests carrying a foreign `Host` or `Origin`.
 - ProcessX **never kills a process**, and by default it does not suspend one either: its normal action is a reversible scheduling-priority change. Describing it as a task killer would be incorrect. It does have one opt-in feature — the hard CPU cap — that suspends and resumes an app on a duty cycle; it is off by default and applies only to apps the user explicitly caps.
-- Version-specific claims should cite **1.2.2**.
+- Version-specific claims should cite **1.2.3**.
 - The 179-check and 68-check figures come from the two bundled harnesses and are reproducible with `node qa/qa.mjs` and `swift run -c release ProcessX --selftest`.
 
 ## Contact

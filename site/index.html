@@ -39,11 +39,11 @@
       "processorRequirements": "Apple Silicon or Intel",
       "description": "Free, open-source macOS process and priority monitor. Shows live CPU, GPU and memory, groups processes per app the way Activity Monitor does, and moves CPU hogs into the macOS background resource band with one click — fully reversible, no admin rights, no telemetry. Ships as a native Swift menu-bar app and as a zero-dependency local web app.",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-      "downloadUrl": "https://github.com/avantigroupai/ProcessX/releases/download/v1.2.2/ProcessX-1.2.2-universal.dmg",
-      "installUrl": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.2",
-      "releaseNotes": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.2",
-      "softwareVersion": "1.2.2",
-      "datePublished": "2026-08-25",
+      "downloadUrl": "https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg",
+      "installUrl": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.3",
+      "releaseNotes": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.3",
+      "softwareVersion": "1.2.3",
+      "datePublished": "2026-08-28",
       "isAccessibleForFree": true,
       "license": "https://github.com/avantigroupai/ProcessX",
       "codeRepository": "https://github.com/avantigroupai/ProcessX",
@@ -53,6 +53,7 @@
         "QuickFast: one click moves background CPU hogs into the macOS low-priority band",
         "Fully reversible throttling via the background resource band instead of renice",
         "Auto-tame watchdog moves sustained background hogs down automatically and restores them on focus",
+        "Notify on hogs sends a macOS notification with Cap and Slow Down action buttons when a background app stays hot, on by default",
         "Opt-in hard CPU cap holds a chosen app under a set percentage by suspending and resuming it, off by default and released the moment the app comes to the front",
         "Processes grouped per app the way Activity Monitor groups them, with CLI sessions surfaced separately",
         "Browser rows expand to real open tabs by name so a single heavy tab can be slowed",
@@ -383,7 +384,7 @@
       <a href="#alternatives">Alternatives</a>
       <a href="#faq">FAQ</a>
       <a href="contact/">Contact</a>
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.2/ProcessX-1.2.2-universal.dmg">Download</a>
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg">Download</a>
     </div>
   </div>
 </nav>
@@ -395,9 +396,9 @@
     <h1>Your Mac isn't slow. <span class="muted">It's just badly scheduled.</span></h1>
     <p class="lede">Some background process — a build, an encode, sixty browser tabs, a long-running AI coding session — is taking every core it can get, and the app in front of you is fighting it for CPU. ProcessX moves the hog into the macOS <strong>background band</strong> with one click. It keeps running. You get your Mac back. <strong>Fully reversible</strong>, no admin rights.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.2/ProcessX-1.2.2-universal.dmg">
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        Download 1.2.2
+        Download 1.2.3
       </a>
       <a class="btn btn-ghost" href="#how">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M9 18l6-6-6-6"/></svg>
@@ -562,6 +563,11 @@
         <div class="ib"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div>
         <h3>Auto-tame watchdog</h3>
         <p>Optional and off by default. Any <em>background</em> process that stays over the threshold for three consecutive samples gets moved down automatically — the classic runaway <span class="mono">ffmpeg</span>. Bring the app to the front and it's restored instantly.</p>
+      </div>
+      <div class="feat">
+        <div class="ib"><svg class="icon" viewBox="0 0 24 24"><path d="M6 17h12M7 17v-5a5 5 0 0 1 10 0v5"/><path d="M10.5 20a1.6 1.6 0 0 0 3 0"/></svg></div>
+        <h3>Notify on hogs</h3>
+        <p>On by default. On the same streak that trips Auto-tame, ProcessX asks instead of acting alone: a macOS notification names the app with <strong>Slow Down</strong> and <strong>Cap</strong> buttons right on the banner, and spells out the tradeoff — Slow Down is gentle and always reversible; Cap is the stronger hard ceiling, which can interrupt a live connection while the app is paused. Either button acts immediately, no window or popover needed.</p>
       </div>
       <div class="feat">
         <div class="ib"><svg class="icon" viewBox="0 0 24 24"><path d="M4 17a9 9 0 1 1 16 0"/><path d="m12 15 3.5-4.5"/><circle cx="12" cy="17" r="1.1"/></svg></div>
@@ -808,9 +814,9 @@ npm test         <span class="c"># 179 checks</span></div>
     <h2>Get your Mac back.</h2>
     <p>Free and open source. No installer, no admin rights, no telemetry — and every change it makes is one click away from being undone.</p>
     <div class="cta-actions">
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.2/ProcessX-1.2.2-universal.dmg">
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        Download ProcessX 1.2.2
+        Download ProcessX 1.2.3
       </a>
       <a class="btn btn-ghost" href="https://github.com/avantigroupai/ProcessX">Source on GitHub</a>
       <a class="btn btn-ghost" href="https://github.com/avantigroupai/ProcessX/issues">Report an issue</a>
@@ -818,7 +824,7 @@ npm test         <span class="c"># 179 checks</span></div>
 
     <div class="install">
       <h3>Native menu-bar app</h3>
-      <p><a href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.2/ProcessX-1.2.2-universal.dmg">Download the notarized disk image</a> — universal (Apple Silicon and Intel). Open it and drag ProcessX to the Applications folder beside it. The image is itself signed, notarized and stapled, and so is the app inside, so it opens with no Gatekeeper warning even on a first launch with no network. Requires macOS 26. <a href="https://github.com/avantigroupai/ProcessX/releases/latest">A zip is also available.</a></p>
+      <p><a href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg">Download the notarized disk image</a> — universal (Apple Silicon and Intel). Open it and drag ProcessX to the Applications folder beside it. The image is itself signed, notarized and stapled, and so is the app inside, so it opens with no Gatekeeper warning even on a first launch with no network. Requires macOS 26. <a href="https://github.com/avantigroupai/ProcessX/releases/latest">A zip is also available.</a></p>
       <p style="margin-top:16px">Or build it yourself with a Swift 6.2 toolchain — <span class="mono">bundle.sh</span> produces the same universal bundle, signed with whatever identity you have:</p>
       <div class="codeblock" style="margin-top:16px">git clone <span class="p">https://github.com/avantigroupai/ProcessX.git</span>
 cd ProcessX/swift <span class="c">&amp;&amp;</span> ./bundle.sh
