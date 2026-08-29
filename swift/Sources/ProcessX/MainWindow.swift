@@ -641,6 +641,7 @@ struct BigGroupRow: View {
             .help("Protected — slowing this would hurt system stability")
         } else {
             HStack(spacing: 6) {
+                capMenu
                 if ourThrottled > 0 {
                     Button("Restore") { monitor.restoreGroup(group) }
                         .buttonStyle(.glass).font(.system(size: UI.caption))
@@ -652,7 +653,6 @@ struct BigGroupRow: View {
                     }
                     .buttonStyle(.glass).font(.system(size: UI.caption))
                 }
-                capMenu
                 QuitMenu(title: group.name, refusal: monitor.quitRefusal(group), count: group.count) {
                     monitor.quitGroup(group, mode: $0)
                 }
