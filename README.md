@@ -29,8 +29,11 @@ caps) live in `policy.json` and are loaded by the Node server under `lib/`.
 
 ## What it does
 
-- **Live monitor** — CPU, GPU (device utilization), memory + memory-pressure and
-  swap, sampled every 2 s. Processes are grouped per app the way Activity
+- **Live monitor** — CPU, GPU (device utilization, plus a per-process GPU column
+  in the native app), memory + memory-pressure and swap, sampled every 2 s.
+  In the native app, clicking the CPU, GPU or Memory card sorts the table by
+  it, clicking *Slowed down* filters to throttled or capped apps, and the
+  columns can be dragged wider or narrower and scale with the window. Processes are grouped per app the way Activity
   Monitor does it (Chrome + its 100 helpers = one row), and terminal-hosted CLI
   sessions (e.g. a `claude` Code session) surface as their own top-level rows
   instead of hiding inside "Terminal".
@@ -150,8 +153,9 @@ do by calling `taskpolicy` directly.
   so a stale record is dropped rather than acted on — but the throttle itself is
   not transactional. In practice this requires PID wraparound inside that
   window.
-- **GPU is system-wide**, not per process: macOS doesn't expose per-process GPU
-  utilization without admin rights.
+- **Per-process GPU is native-app only.** The Swift app reads each process's
+  accumulated GPU time from IOKit (`AGXDeviceUserClient`), no admin rights
+  needed; the web build still shows device-wide GPU utilization only.
 - **A cap can't hold a process below ~2 % of its unconstrained usage.** Every
   capped group keeps a sliver of each duty cycle so it is never frozen outright,
   which puts a floor under how low a cap can go. A capped app is also genuinely

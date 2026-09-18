@@ -74,7 +74,12 @@ the Trash (settings live in `defaults delete dev.honato.processx`).
 ```sh
 swift run -c release ProcessX --selftest        # 101 checks, real syscalls
 swift run -c release ProcessX --render out.png --dark   # rasterise the UI
+swift run -c release ProcessX --render out.png --window --width 1440   # whole window at a given width
 ```
+
+The table's name column takes whatever width the other columns leave, so a
+layout check only means something at a stated width; `--width` defaults to the
+window's 1140 pt minimum, the tightest case.
 
 `--selftest` exercises the real stack end-to-end: it spawns its own busy child
 process, throttles it through the same code path a button click uses, and asserts
@@ -101,7 +106,7 @@ resume — are load-independent and always assert.
 | Throttle | `taskpolicy -b` subprocess | `setpriority(PRIO_DARWIN_PROCESS, pid, PRIO_DARWIN_BG)` |
 | Read throttle state | own bookkeeping only | `pti_priority` — the kernel's own view |
 | Memory | `vm_stat` subprocess + parsing | `host_statistics64` |
-| GPU | `ioreg` subprocess + regex | IOKit registry directly |
+| GPU | `ioreg` subprocess + regex, device-wide | IOKit registry directly, device-wide and per process |
 | Frontmost app | 2× `lsappinfo` subprocess | `NSWorkspace` |
 | CPU% | `ps` decaying average | true interval delta of task time |
 | Cost | ~8 subprocesses every 2s | 0 subprocesses |
