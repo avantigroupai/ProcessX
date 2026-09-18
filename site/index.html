@@ -39,11 +39,11 @@
       "processorRequirements": "Apple Silicon or Intel",
       "description": "Free, open-source macOS process and priority monitor. Shows live CPU, GPU and memory, groups processes per app the way Activity Monitor does, and moves CPU hogs into the macOS background resource band with one click — fully reversible, no admin rights, no telemetry. Ships as a native Swift menu-bar app and as a zero-dependency local web app.",
       "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-      "downloadUrl": "https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg",
-      "installUrl": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.3",
-      "releaseNotes": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.3",
-      "softwareVersion": "1.2.3",
-      "datePublished": "2026-08-28",
+      "downloadUrl": "https://github.com/avantigroupai/ProcessX/releases/download/v1.2.4/ProcessX-1.2.4-universal.dmg",
+      "installUrl": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.4",
+      "releaseNotes": "https://github.com/avantigroupai/ProcessX/releases/tag/v1.2.4",
+      "softwareVersion": "1.2.4",
+      "datePublished": "2026-09-18",
       "isAccessibleForFree": true,
       "license": "https://github.com/avantigroupai/ProcessX",
       "codeRepository": "https://github.com/avantigroupai/ProcessX",
@@ -53,6 +53,7 @@
         "QuickFast: one click moves background CPU hogs into the macOS low-priority band",
         "Fully reversible throttling via the background resource band instead of renice",
         "Auto-tame watchdog moves sustained background hogs down automatically and restores them on focus",
+        "Per-process GPU column read from IOKit without admin rights, and clickable CPU, GPU, Memory and Slowed down cards that sort or filter the table",
         "Notify on hogs sends a macOS notification with Cap and Slow Down action buttons when a background app stays hot, on by default",
         "Opt-in hard CPU cap holds a chosen app under a set percentage by suspending and resuming it, off by default and released the moment the app comes to the front",
         "Processes grouped per app the way Activity Monitor groups them, with CLI sessions surfaced separately",
@@ -225,6 +226,7 @@
 
   /* ---------- App mockup ---------- */
   .shot { margin-top: 64px; }
+  .shot-img { display: block; width: 100%; height: auto; }
   .window {
     border-radius: 14px; overflow: hidden; border: 1px solid var(--line-strong);
     background: var(--bg-2);
@@ -384,7 +386,7 @@
       <a href="#alternatives">Alternatives</a>
       <a href="#faq">FAQ</a>
       <a href="contact/">Contact</a>
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg">Download</a>
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.4/ProcessX-1.2.4-universal.dmg">Download</a>
     </div>
   </div>
 </nav>
@@ -396,9 +398,9 @@
     <h1>Your Mac isn't slow. <span class="muted">It's just badly scheduled.</span></h1>
     <p class="lede">Some background process — a build, an encode, sixty browser tabs, a long-running AI coding session — is taking every core it can get, and the app in front of you is fighting it for CPU. ProcessX moves the hog into the macOS <strong>background band</strong> with one click. It keeps running. You get your Mac back. <strong>Fully reversible</strong>, no admin rights.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg">
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.4/ProcessX-1.2.4-universal.dmg">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        Download 1.2.3
+        Download 1.2.4
       </a>
       <a class="btn btn-ghost" href="#how">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M9 18l6-6-6-6"/></svg>
@@ -411,111 +413,12 @@
       <span><svg class="icon" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg> Every change is undoable</span>
     </div>
 
-    <!-- Synthetic UI mockup — representative values, not a capture of a real machine -->
+    <!-- Real capture of ProcessX 1.2.4 (dark theme) on a live Mac -->
     <div class="shot">
-      <div class="window" role="img" aria-label="The ProcessX interface: CPU, GPU, memory and slowed-process tiles above a table of applications grouped per app, with Slow down and Restore actions and an expanded browser row listing individual tabs.">
-        <div class="titlebar">
-          <div class="traffic"><i></i><i></i><i></i></div>
-          <div class="title"><svg class="icon" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg> ProcessX</div>
-        </div>
-        <div class="app">
-          <div class="tiles">
-            <div class="tile">
-              <div class="lab"><svg class="icon" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9.5" y="9.5" width="5" height="5"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg> CPU</div>
-              <div class="val">86<small>%</small></div>
-              <div class="meter"><i style="width:86%"></i></div>
-              <div class="ft">10 cores · load 9.4</div>
-            </div>
-            <div class="tile">
-              <div class="lab"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="9.5" cy="12" r="3"/><path d="M16 9.5v5M19 9.5v5"/></svg> GPU</div>
-              <div class="val">31<small>%</small></div>
-              <div class="meter"><i style="width:31%"></i></div>
-              <div class="ft">device utilization</div>
-            </div>
-            <div class="tile">
-              <div class="lab"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 7v10M12 7v10M17 7v10M5 20.5h14"/></svg> Memory</div>
-              <div class="val">27.4<small>GB</small></div>
-              <div class="meter"><i style="width:76%"></i></div>
-              <div class="ft">pressure normal · swap 0 B</div>
-            </div>
-            <div class="tile">
-              <div class="lab"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8.5 12.5 12 16l3.5-3.5"/></svg> Slowed down</div>
-              <div class="val">3</div>
-              <div class="ft">in the background band · Restore all</div>
-            </div>
-          </div>
-
-          <div class="ptable">
-            <div class="hd">
-              <div>App / process</div>
-              <div class="num">CPU</div>
-              <div class="num c-mem">Memory</div>
-              <div class="c-prio">Priority</div>
-              <div></div>
-            </div>
-            <div class="r on">
-              <div class="nm">
-                <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>
-                <b>claude</b><span>Claude Code · 4 processes</span>
-              </div>
-              <div class="num hot">412%</div>
-              <div class="num c-mem">3.1 GB</div>
-              <div class="c-prio"><span class="chip bg">background</span></div>
-              <div class="act">Restore</div>
-            </div>
-            <div class="r">
-              <div class="nm">
-                <svg class="icon" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>
-                <b>Google Chrome</b><span>1 + 62 helpers</span>
-              </div>
-              <div class="num hot">187%</div>
-              <div class="num c-mem">6.4 GB</div>
-              <div class="c-prio"><span class="chip">normal</span></div>
-              <div class="act p">Slow down</div>
-            </div>
-            <div class="r">
-              <div class="nm sub">
-                <svg class="icon tw" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18z"/></svg>
-                <b>YouTube — 4K live stream</b><span>tab · pid 48122</span>
-              </div>
-              <div class="num">96%</div>
-              <div class="num c-mem">1.2 GB</div>
-              <div class="c-prio"><span class="chip">normal</span></div>
-              <div class="act">Slow down</div>
-            </div>
-            <div class="r">
-              <div class="nm">
-                <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>
-                <b>ffmpeg</b><span>Terminal session · auto-tamed</span>
-              </div>
-              <div class="num">98%</div>
-              <div class="num c-mem">412 MB</div>
-              <div class="c-prio"><span class="chip bg">background</span></div>
-              <div class="act">Restore</div>
-            </div>
-            <div class="r">
-              <div class="nm">
-                <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
-                <b>Music</b><span>media-safe · never touched</span>
-              </div>
-              <div class="num">8%</div>
-              <div class="num c-mem">318 MB</div>
-              <div class="c-prio"><span class="chip">protected</span></div>
-              <div class="act">—</div>
-            </div>
-            <div class="r">
-              <div class="nm">
-                <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
-                <b>Figma</b><span>frontmost · never touched</span>
-              </div>
-              <div class="num">44%</div>
-              <div class="num c-mem">2.0 GB</div>
-              <div class="c-prio"><span class="chip">foreground</span></div>
-              <div class="act">—</div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <picture>
+        <source type="image/webp" srcset="img/processx-1.2.4-1x.webp 1274w, img/processx-1.2.4.webp 2548w" sizes="(min-width: 1180px) 1140px, 100vw">
+        <img class="window shot-img" src="img/processx-1.2.4.jpg" width="1274" height="1040" fetchpriority="high" decoding="async" alt="ProcessX 1.2.4: CPU, GPU, memory and slowed-down gauge cards above a table of running apps grouped per app, with CPU, memory, per-process GPU and priority columns and Cap, Slow down and Quit actions on each row.">
+      </picture>
     </div>
   </div>
 </header>
@@ -563,6 +466,11 @@
         <div class="ib"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></div>
         <h3>Auto-tame watchdog</h3>
         <p>Optional and off by default. Any <em>background</em> process that stays over the threshold for three consecutive samples gets moved down automatically — the classic runaway <span class="mono">ffmpeg</span>. Bring the app to the front and it's restored instantly.</p>
+      </div>
+      <div class="feat">
+        <div class="ib"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="9.5" cy="12" r="3"/><path d="M16 9.5v5M19 9.5v5"/></svg></div>
+        <h3>GPU per app</h3>
+        <p>New in 1.2.4. A sortable GPU column next to CPU and Memory, read straight from IOKit with no admin rights. Click the CPU, GPU or Memory card to sort by it, or the Slowed down card to see only what's throttled or capped. Columns resize and scale with the window, so Cap, Slow down and Quit always stay in reach.</p>
       </div>
       <div class="feat">
         <div class="ib"><svg class="icon" viewBox="0 0 24 24"><path d="M6 17h12M7 17v-5a5 5 0 0 1 10 0v5"/><path d="M10.5 20a1.6 1.6 0 0 0 3 0"/></svg></div>
@@ -814,9 +722,9 @@ npm test         <span class="c"># 179 checks</span></div>
     <h2>Get your Mac back.</h2>
     <p>Free and open source. No installer, no admin rights, no telemetry — and every change it makes is one click away from being undone.</p>
     <div class="cta-actions">
-      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg">
+      <a class="btn btn-primary" href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.4/ProcessX-1.2.4-universal.dmg">
         <svg class="icon" viewBox="0 0 24 24" style="width:16px;height:16px"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
-        Download ProcessX 1.2.3
+        Download ProcessX 1.2.4
       </a>
       <a class="btn btn-ghost" href="https://github.com/avantigroupai/ProcessX">Source on GitHub</a>
       <a class="btn btn-ghost" href="https://github.com/avantigroupai/ProcessX/issues">Report an issue</a>
@@ -824,7 +732,7 @@ npm test         <span class="c"># 179 checks</span></div>
 
     <div class="install">
       <h3>Native menu-bar app</h3>
-      <p><a href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.3/ProcessX-1.2.3-universal.dmg">Download the notarized disk image</a> — universal (Apple Silicon and Intel). Open it and drag ProcessX to the Applications folder beside it. The image is itself signed, notarized and stapled, and so is the app inside, so it opens with no Gatekeeper warning even on a first launch with no network. Requires macOS 26. <a href="https://github.com/avantigroupai/ProcessX/releases/latest">A zip is also available.</a></p>
+      <p><a href="https://github.com/avantigroupai/ProcessX/releases/download/v1.2.4/ProcessX-1.2.4-universal.dmg">Download the notarized disk image</a> — universal (Apple Silicon and Intel). Open it and drag ProcessX to the Applications folder beside it. The image is itself signed, notarized and stapled, and so is the app inside, so it opens with no Gatekeeper warning even on a first launch with no network. Requires macOS 26. <a href="https://github.com/avantigroupai/ProcessX/releases/latest">A zip is also available.</a></p>
       <p style="margin-top:16px">Or build it yourself with a Swift 6.2 toolchain — <span class="mono">bundle.sh</span> produces the same universal bundle, signed with whatever identity you have:</p>
       <div class="codeblock" style="margin-top:16px">git clone <span class="p">https://github.com/avantigroupai/ProcessX.git</span>
 cd ProcessX/swift <span class="c">&amp;&amp;</span> ./bundle.sh
