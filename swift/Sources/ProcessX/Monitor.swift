@@ -41,6 +41,9 @@ final class Monitor: ObservableObject {
     private(set) var caps: [CapRecord] = []
     @Published var search: String = "" { didSet { refreshVisible() } }
     @Published var showSystem = false { didSet { refreshVisible() } }
+    /// Set by clicking the "Slowed down" card: restrict the table to groups
+    /// with something throttled or capped, instead of showing everything.
+    @Published var filterThrottledOnly = false { didSet { refreshVisible() } }
     @Published var lastMessage: String?
     @Published private(set) var lastApplied: AppliedChange?
     /// Rolling history for the sparklines (newest last). Kept filling while the
@@ -49,6 +52,87 @@ final class Monitor: ObservableObject {
     /// they come back.
     private(set) var cpuHistory: [Double] = []
     private(set) var gpuHistory: [Double] = []
+    /// Cumulative per-pid GPU nanoseconds as of the previous tick, and when
+    /// that reading was taken — `tick()` diffs against these to turn
+    /// `SystemStats.gpuTimeByPID()`'s running counters into a percentage,
+    /// the same delta-over-interval shape `cpuPct` already arrives in from
+    /// the sampler. No opt-in needed: unlike the once-considered
+    /// `powermetrics`-based approach, this reads straight from IOKit with no
+    /// extra privilege, so it costs nothing to always have on.
+    private var lastGPUTimeByPID: [pid_t: UInt64] = [:]
+    private var lastGPUSampleAt: Date?
+
+    /// User-adjustable column widths — dragged from the header, persisted
+    /// across launches. These are the *preference* the drag handle writes;
+    /// what the header and every row type (BigGroupRow, RendererRow,
+    /// BigChildRow) actually reads is the scaled `*ColumnWidth` below, so a
+    /// preference set on a wide display doesn't overflow a narrower one.
+    ///
+    /// The defaults sum to 810, which fits inside the 826pt the flexible
+    /// columns get at the 1140pt minimum window width — so a from-scratch
+    /// launch on the smallest allowed window already shows every column at
+    /// its natural width, with no scaling and nothing clipped.
+    ///
+    /// CPU and GPU are 155 because that is what a `CPUCell` actually needs:
+    /// "100.0%" at `UI.num` plus the 10pt gap plus the 78pt bar is ~148, and
+    /// below that the percentage truncates to "0…" — a column of unreadable
+    /// numbers, which is worse than a narrower name column.
+    ///
+    /// The keys carry a `2` because the first set shipped defaults that only
+    /// fitted a wider actions column than the one Cap and Slow down now need
+    /// together. A stored value from that scheme (or dragged wide on a big
+    /// display) would otherwise be restored on a small screen and be scaled
+    /// down on every single launch, which is not what "my preferred width"
+    /// should mean.
+    static let columnWidthRange: ClosedRange<Double> = 60...600
+    /// APP / PROCESS has no stored width and no drag handle: it is the flex
+    /// column. It starts from this base and takes every point the other four
+    /// don't use, because a process name is the one cell whose content is
+    /// unbounded — "com.apple.Virtualizati…" truncating while a wide window
+    /// spends 400pt on empty space between PRIORITY and the row actions is
+    /// the layout this replaced.
+    static let nameColumnBase: Double = 300
+    @AppStorage("colWidthCPU2") var cpuColumnPreference: Double = 155
+    @AppStorage("colWidthMemory2") var memoryColumnPreference: Double = 100
+    @AppStorage("colWidthGPU2") var gpuColumnPreference: Double = 155
+    @AppStorage("colWidthPriority2") var priorityColumnPreference: Double = 100
+
+    /// The table card's current on-screen width, measured by MainWindow.
+    /// Column widths scale against this, so a preference dragged wide on one
+    /// display doesn't run the trailing actions (Cap, Slow down, Quit) off
+    /// the edge of a narrower one — it reflows instead of clipping.
+    @Published var tableRowWidth: Double = 1140
+
+    /// Fixed chrome each row spends outside the five flexible columns: the
+    /// row's own horizontal padding (22pt a side), the priority column's
+    /// leading pad (22pt), and the trailing action/order column.
+    private static let tableChrome: Double = 44 + 22 + Double(UI.actionsWidth)
+
+    private var naturalColumns: Double {
+        Monitor.nameColumnBase + cpuColumnPreference + memoryColumnPreference
+            + gpuColumnPreference + priorityColumnPreference
+    }
+    private var availableColumns: Double { tableRowWidth - Monitor.tableChrome }
+
+    /// Shrink-only: below `naturalColumns` every column gives up width in
+    /// proportion, so a narrow window reflows instead of clipping. Surplus is
+    /// *not* handed out this way — scaling the numeric columns up just pads
+    /// their numbers, so it all goes to the name instead.
+    private var columnScale: Double {
+        guard naturalColumns > 0 else { return 1 }
+        guard availableColumns > 0 else { return 0 }
+        return min(1, availableColumns / naturalColumns)
+    }
+    private var nameSurplus: Double { max(0, availableColumns - naturalColumns) }
+
+    var nameColumnWidth: Double {
+        max(Monitor.columnWidthRange.lowerBound, Monitor.nameColumnBase * columnScale + nameSurplus)
+    }
+    var cpuColumnWidth: Double { max(Monitor.columnWidthRange.lowerBound, cpuColumnPreference * columnScale) }
+    var memoryColumnWidth: Double { max(Monitor.columnWidthRange.lowerBound, memoryColumnPreference * columnScale) }
+    var gpuColumnWidth: Double { max(Monitor.columnWidthRange.lowerBound, gpuColumnPreference * columnScale) }
+    var priorityColumnWidth: Double { max(Monitor.columnWidthRange.lowerBound, priorityColumnPreference * columnScale) }
+
     @Published var sort: SortKey = .cpu { didSet { refreshVisible() } }
     /// Sort direction for the active column. Activity-Monitor style: click a
     /// column header to sort by it; click again to flip direction.
@@ -77,6 +161,12 @@ final class Monitor: ObservableObject {
         updateFreeze()
     }
 
+    /// Clicking the "Slowed down" card: show only throttled/capped groups, or
+    /// clear that back to everything on a second click.
+    func toggleThrottledFilter() {
+        filterThrottledOnly.toggle()
+    }
+
     /// Snapshot the order *before* flipping the flag, so the frozen ranking is
     /// the one the user is currently looking at.
     private func updateFreeze() {
@@ -94,7 +184,7 @@ final class Monitor: ObservableObject {
     @Published private(set) var tabsNotPermitted: Set<String> = []
 
     enum SortKey: String, CaseIterable, Identifiable {
-        case name, cpu, memory, priority
+        case name, cpu, memory, priority, gpu
         var id: String { rawValue }
         var label: String {
             switch self {
@@ -102,6 +192,7 @@ final class Monitor: ObservableObject {
             case .memory: return "Memory"
             case .name: return "Name"
             case .priority: return "Priority"
+            case .gpu: return "GPU"
             }
         }
         /// The natural first-click direction: names read A→Z, everything else
@@ -109,11 +200,20 @@ final class Monitor: ObservableObject {
         var defaultAscending: Bool { self == .name }
     }
 
-    /// Click a column header: the same column flips direction; a new column
-    /// adopts that column's natural default direction.
+    /// Click a column header (or a CPU/GPU/Memory card): the same column
+    /// flips direction; a new column adopts that column's natural default
+    /// direction.
+    ///
+    /// Also clears `filterThrottledOnly`. Without this, picking "Slowed
+    /// down" when nothing is currently throttled pins the table to a
+    /// permanently empty view — CPU/GPU/Memory look identical to the
+    /// four-card row's other buttons, so clicking one to "get back out" is
+    /// the obvious next move, and it did nothing before this: the filter and
+    /// the sort key were independent state, so nothing here ever touched it.
     func setSort(_ key: SortKey) {
         if sort == key { sortAscending.toggle() }
         else { sort = key; sortAscending = key.defaultAscending }
+        filterThrottledOnly = false
     }
 
     /// Auto-tame: throttle a background process only after it has been hot for
@@ -247,8 +347,30 @@ final class Monitor: ObservableObject {
     // MARK: - sampling
 
     func tick() {
-        let procs = sampler.sample()
+        var procs = sampler.sample()
         guard !procs.isEmpty else { return }   // a bad read must never look like "everything exited"
+
+        // Splice in per-pid GPU usage before grouping — Grouping.build sums
+        // gpuPct onto each ProcGroup the same way it sums cpuPct/rss.
+        // SystemStats.gpuTimeByPID() returns cumulative nanoseconds (a
+        // running counter, like cputime), so a rate needs two readings: this
+        // tick's counters minus last tick's, divided by the wall-clock gap
+        // between them. The first tick after launch has no prior reading to
+        // diff against, so every gpuPct is 0 until the second.
+        let gpuNow = SystemStats.gpuTimeByPID()
+        let sampledAt = Date()
+        if let lastAt = lastGPUSampleAt {
+            let elapsedNs = sampledAt.timeIntervalSince(lastAt) * 1_000_000_000
+            if elapsedNs > 0 {
+                for i in procs.indices {
+                    let pid = procs[i].pid
+                    guard let cur = gpuNow[pid], let prev = lastGPUTimeByPID[pid], cur >= prev else { continue }
+                    procs[i].gpuPct = min(100, max(0, Double(cur - prev) / elapsedNs * 100))
+                }
+            }
+        }
+        lastGPUTimeByPID = gpuNow
+        lastGPUSampleAt = sampledAt
 
         var m = Grouping.build(procs: procs, frontPID: SystemStats.frontmostPID(), myUID: myUID)
         m.groups.sort { $0.cpu > $1.cpu }
@@ -751,7 +873,7 @@ final class Monitor: ObservableObject {
 
     private func computeVisibleGroups() -> [ProcGroup] {
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
-        let filtered = model.groups.filter { g in
+        var filtered = model.groups.filter { g in
             // Don't list ourselves — we can't act on it, so it's just noise.
             if g.procs.contains(where: { $0.pid == selfPID }) { return false }
             if !showSystem && g.isSystem && q.isEmpty { return false }
@@ -761,6 +883,9 @@ final class Monitor: ObservableObject {
             }
             return g.cpu > 0.05 || g.mem > 20 * 1024 * 1024
                 || g.procs.contains { store.record($0.pid) != nil }
+        }
+        if filterThrottledOnly {
+            filtered = filtered.filter { $0.throttledByUs > 0 || isCapped($0.key) }
         }
         // Build one ascending comparator per column, then reverse for descending
         // so every column toggles direction consistently.
@@ -773,6 +898,7 @@ final class Monitor: ObservableObject {
             let (a, b) = (self.throttleRank($0), self.throttleRank($1))
             return a < b || (a == b && $0.cpu < $1.cpu)
         }
+        case .gpu: asc = { $0.gpu < $1.gpu || ($0.gpu == $1.gpu && $0.cpu < $1.cpu) }
         }
         let ranked = filtered.sorted(by: asc)
         let live = sortAscending ? ranked : Array(ranked.reversed())

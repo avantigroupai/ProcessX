@@ -12,6 +12,13 @@ enum UI {
     static let rowHeight: CGFloat = 46
     static let gutter: CGFloat = 24
     static let cardRadius: CGFloat = 24
+    /// The trailing column that holds a row's actions — Cap, Slow down/Restore
+    /// and Quit — and, in the header, the live/held order indicator. Wide
+    /// enough for all three side by side: Cap and Slow down are peer buttons,
+    /// so neither may be the one that gets squeezed. `Monitor.tableChrome`
+    /// subtracts this before scaling the flexible columns, so it is reserved
+    /// space, never something the columns can eat into.
+    static let actionsWidth: CGFloat = 200
 }
 
 private func glyph(_ name: String, _ size: CGFloat) -> some View {
@@ -36,13 +43,23 @@ struct MainWindow: View {
     private var theme: AppTheme { monitor.theme }
 
     var body: some View {
-        VStack(spacing: UI.gutter) {
-            header
-            gauges.frame(height: 232).padding(.horizontal, UI.gutter)
-            controls.padding(.horizontal, UI.gutter)
-            processTable
-                .padding(.horizontal, UI.gutter)
-                .padding(.bottom, UI.gutter)
+        // Measures the window's actual content width so the table can scale
+        // its columns to it. Without this, a column preference dragged wide
+        // on one display just keeps that pixel width on a smaller one —
+        // there is nothing else in the layout that would ever shrink it —
+        // and the trailing row actions (Cap, Slow down, Quit) run off the
+        // edge instead of reflowing.
+        GeometryReader { proxy in
+            VStack(spacing: UI.gutter) {
+                header
+                gauges.frame(height: 232).padding(.horizontal, UI.gutter)
+                controls.padding(.horizontal, UI.gutter)
+                processTable
+                    .padding(.horizontal, UI.gutter)
+                    .padding(.bottom, UI.gutter)
+            }
+            .onAppear { monitor.tableRowWidth = proxy.size.width - UI.gutter * 2 }
+            .onChange(of: proxy.size.width) { _, w in monitor.tableRowWidth = w - UI.gutter * 2 }
         }
         .background(ThemeBackground(theme: theme))
         // Tell the monitor when this window is covered, minimised or closed, so
@@ -51,7 +68,7 @@ struct MainWindow: View {
         .onDisappear { monitor.setWindowVisible(false) }
         .tint(theme.accent)
         .preferredColorScheme(theme.forcedScheme)
-        .frame(minWidth: 980, minHeight: 660)
+        .frame(minWidth: 1140, minHeight: 660)
     }
 
     // MARK: header
@@ -139,12 +156,14 @@ struct MainWindow: View {
                       progress: monitor.totalCPU / 100,
                       big: monitor.cpuHistory.isEmpty ? "–" : String(format: "%.0f", monitor.totalCPU),
                       unit: "%", foot: "\(SystemStats.coreCount) cores active",
-                      history: monitor.cpuHistory)
+                      history: monitor.cpuHistory,
+                      action: { monitor.setSort(.cpu) }, isActive: monitor.sort == .cpu)
             GaugeCard(theme: theme, icon: "display", label: "GPU",
                       progress: Double(monitor.gpu ?? 0) / 100,
                       big: monitor.gpu.map(String.init) ?? "n/a",
                       unit: monitor.gpu == nil ? "" : "%", foot: "device utilization",
-                      history: monitor.gpuHistory)
+                      history: monitor.gpuHistory,
+                      action: { monitor.setSort(.gpu) }, isActive: monitor.sort == .gpu)
             GaugeCard(theme: theme, icon: "memorychip", label: "Memory",
                       progress: monitor.memory.total > 0
                         ? Double(monitor.memory.used) / Double(monitor.memory.total) : 0,
@@ -153,10 +172,12 @@ struct MainWindow: View {
                         ? "of \(fmtBytes(monitor.memory.total))"
                         : "pressure \(monitor.memory.pressure)",
                       alert: monitor.memory.pressure != "normal",
-                      history: [])
+                      history: [],
+                      action: { monitor.setSort(.memory) }, isActive: monitor.sort == .memory)
             CountCard(theme: theme, icon: "tortoise", label: "Slowed down",
                       count: monitor.throttled.count,
-                      foot: tamedFoot)
+                      foot: tamedFoot,
+                      action: { monitor.toggleThrottledFilter() }, isActive: monitor.filterThrottledOnly)
         }
     }
 
@@ -214,18 +235,32 @@ struct MainWindow: View {
     private var processTable: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                sortHeader("APP / PROCESS", .name, width: nil, trailing: false)
-                sortHeader("CPU", .cpu, width: 180, trailing: true)
-                sortHeader("MEMORY", .memory, width: 100, trailing: true)
-                sortHeader("PRIORITY", .priority, width: 110, trailing: false, leadingPad: 22)
-                orderIndicator.frame(width: 150, alignment: .trailing)
+                // No `resizable:` — APP / PROCESS is the flex column, sized by
+                // what the other four leave over. It still gets the divider
+                // line, just not a handle that would fight the fill.
+                sortHeader("APP / PROCESS", .name, width: CGFloat(monitor.nameColumnWidth), trailing: false)
+                sortHeader("CPU", .cpu, width: CGFloat(monitor.cpuColumnWidth), trailing: true,
+                           resizable: $monitor.cpuColumnPreference)
+                sortHeader("MEMORY", .memory, width: CGFloat(monitor.memoryColumnWidth), trailing: true,
+                           resizable: $monitor.memoryColumnPreference)
+                sortHeader("GPU", .gpu, width: CGFloat(monitor.gpuColumnWidth), trailing: true,
+                           resizable: $monitor.gpuColumnPreference)
+                sortHeader("PRIORITY", .priority, width: CGFloat(monitor.priorityColumnWidth), trailing: false,
+                           leadingPad: 22, resizable: $monitor.priorityColumnPreference)
+                // Absorbs whatever width dragging columns narrower frees up,
+                // so `orderIndicator` stays pinned to the trailing edge the
+                // way it always has — the same job APP/PROCESS's old
+                // maxWidth: .infinity used to do by itself, before it became
+                // a fixed, independently resizable column like the others.
+                Spacer(minLength: 0)
+                orderIndicator.frame(width: UI.actionsWidth, alignment: .trailing)
             }
             .padding(.horizontal, 22).padding(.vertical, 12)
 
             Divider().opacity(0.5)
 
             if monitor.visibleGroups.isEmpty {
-                Text(monitor.search.isEmpty ? "Sampling…" : "Nothing matches.")
+                Text(emptyTableMessage)
                     .font(.system(size: UI.body)).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -245,6 +280,17 @@ struct MainWindow: View {
         }
         .frame(maxHeight: .infinity)
         .themedCard(theme, radius: UI.cardRadius)
+    }
+
+    /// "Sampling…" is only true for the real startup gap before the first
+    /// reading lands — reusing it for every other empty case (a search with
+    /// no hits, "Slowed down" clicked with nothing actually throttled) reads
+    /// as "still loading" and never explains why the table stays blank.
+    private var emptyTableMessage: String {
+        if monitor.cpuHistory.isEmpty { return "Sampling…" }
+        if monitor.filterThrottledOnly { return "Nothing is slowed down or capped right now." }
+        if !monitor.search.isEmpty { return "Nothing matches." }
+        return "Nothing to show."
     }
 
     /// Says whether rows are re-ranking or being held, and lets the hold be
@@ -274,7 +320,8 @@ struct MainWindow: View {
     // shift when the sort changes.
     @ViewBuilder
     private func sortHeader(_ title: String, _ key: Monitor.SortKey,
-                            width: CGFloat?, trailing: Bool, leadingPad: CGFloat = 0) -> some View {
+                            width: CGFloat?, trailing: Bool, leadingPad: CGFloat = 0,
+                            resizable: Binding<Double>? = nil) -> some View {
         let active = monitor.sort == key
         let label = HStack(spacing: 4) {
             if trailing { Spacer(minLength: 0) }
@@ -299,6 +346,53 @@ struct MainWindow: View {
         .buttonStyle(.plain)
         .onHover { $0 ? NSCursor.pointingHand.set() : NSCursor.arrow.set() }
         .help("Sort by \(title.lowercased()) — click again to reverse")
+        // The handle sits at this column's own trailing edge — dragging it
+        // grows or shrinks THIS column and pushes everything after it left
+        // or right, Excel-style, rather than stealing width from a neighbor.
+        .overlay(alignment: .trailing) { ColumnResizeHandle(width: resizable) }
+    }
+}
+
+/// A hairline divider between two header columns that's actually an 11pt-wide
+/// drag target — a bare 1px line is unaimable with a mouse. Dragging resizes
+/// only the column it's attached to (via `width`); everything after it in the
+/// row shifts left/right as a consequence of that column's frame changing,
+/// the same way dragging a column border in a spreadsheet works.
+private struct ColumnResizeHandle: View {
+    /// nil for the flex column, which has no width of its own to drag — it
+    /// gets the divider line and nothing else, rather than a handle that
+    /// would appear dead because the fill immediately undoes every drag.
+    var width: Binding<Double>?
+    @State private var dragOrigin: Double?
+
+    private var line: some View {
+        Rectangle()
+            .fill(.clear)
+            .frame(width: 11)
+            .overlay(Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1))
+    }
+
+    @ViewBuilder var body: some View {
+        if let width {
+            line
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            let origin = dragOrigin ?? width.wrappedValue
+                            dragOrigin = origin
+                            width.wrappedValue = min(
+                                Monitor.columnWidthRange.upperBound,
+                                max(Monitor.columnWidthRange.lowerBound, origin + value.translation.width))
+                        }
+                        .onEnded { _ in dragOrigin = nil }
+                )
+        } else {
+            line
+        }
     }
 }
 
@@ -361,6 +455,12 @@ private struct GaugeCard: View {
     var foot: String
     var alert: Bool = false
     var history: [Double]
+    /// Clicking the card drives the table below (sort by this column). nil
+    /// leaves the card inert — plain display, no button chrome.
+    var action: (() -> Void)?
+    /// Whether this card's metric is the table's current sort column —
+    /// mirrors the accent tint `sortHeader` gives the active column.
+    var isActive: Bool = false
 
     // Match the ring exactly: brand accent until critical (>85%), then red. A
     // separate orange band here made the sparkline disagree with its own ring.
@@ -369,6 +469,25 @@ private struct GaugeCard: View {
     }
 
     var body: some View {
+        Group {
+            if let action {
+                // contentShape is not optional decoration here: without it a
+                // Button only accepts clicks on the icon/ring/text pixels
+                // actually drawn inside `content`, not the padding and gaps
+                // around them — most of a click anywhere else on the card
+                // silently misses, which reads as "needs two clicks."
+                Button(action: action) { content.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .onHover { $0 ? NSCursor.pointingHand.set() : NSCursor.arrow.set() }
+            } else {
+                content
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: UI.cardRadius)
+            .strokeBorder(theme.accent, lineWidth: 2).opacity(isActive ? 1 : 0))
+    }
+
+    private var content: some View {
         VStack(spacing: 12) {
             HStack(spacing: 7) {
                 glyph(icon, UI.caption).foregroundStyle(.secondary)
@@ -413,8 +532,32 @@ private struct CountCard: View {
     var label: String
     var count: Int
     var foot: String
+    /// Clicking the card filters the table below to just this set. nil leaves
+    /// the card inert — plain display, no button chrome.
+    var action: (() -> Void)?
+    /// Whether the table is currently filtered down to this card's set.
+    var isActive: Bool = false
 
     var body: some View {
+        Group {
+            if let action {
+                // contentShape is not optional decoration here: without it a
+                // Button only accepts clicks on the icon/ring/text pixels
+                // actually drawn inside `content`, not the padding and gaps
+                // around them — most of a click anywhere else on the card
+                // silently misses, which reads as "needs two clicks."
+                Button(action: action) { content.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .onHover { $0 ? NSCursor.pointingHand.set() : NSCursor.arrow.set() }
+            } else {
+                content
+            }
+        }
+        .overlay(RoundedRectangle(cornerRadius: UI.cardRadius)
+            .strokeBorder(theme.accent, lineWidth: 2).opacity(isActive ? 1 : 0))
+    }
+
+    private var content: some View {
         VStack(spacing: 12) {
             HStack(spacing: 7) {
                 glyph(icon, UI.caption).foregroundStyle(.secondary)
@@ -538,7 +681,7 @@ struct BigGroupRow: View {
                         ProcessInfoCard(info: info, count: group.count)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: CGFloat(monitor.nameColumnWidth), alignment: .leading)
                 // Aiming at a disclosure triangle is a needless precision task when
                 // everything beside it — icon, name, count, pills — is inert. The
                 // whole leading strip is the target; the buttons inside it (info,
@@ -546,11 +689,16 @@ struct BigGroupRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture { if canExpand { toggledOpen = !expanded } }
 
-                CPUCell(pct: group.cpu, accent: accent).frame(width: 180, alignment: .trailing)
+                CPUCell(pct: group.cpu, accent: accent).frame(width: CGFloat(monitor.cpuColumnWidth), alignment: .trailing)
                 Text(fmtBytes(group.mem)).font(.system(size: UI.num)).monospacedDigit()
-                    .frame(width: 100, alignment: .trailing)
-                priorityCell.frame(width: 110, alignment: .leading).padding(.leading, 22)
-                actions.frame(width: 150, alignment: .trailing)
+                    .frame(width: CGFloat(monitor.memoryColumnWidth), alignment: .trailing)
+                CPUCell(pct: group.gpu, accent: accent).frame(width: CGFloat(monitor.gpuColumnWidth), alignment: .trailing)
+                priorityCell.frame(width: CGFloat(monitor.priorityColumnWidth), alignment: .leading).padding(.leading, 22)
+                // See the header's matching Spacer: APP/PROCESS is now a
+                // fixed, resizable column rather than the thing that used to
+                // absorb all leftover width, so something else has to.
+                Spacer(minLength: 0)
+                actions.frame(width: UI.actionsWidth, alignment: .trailing)
             }
             .padding(.horizontal, 22).frame(height: UI.rowHeight)
             .background(hovering ? Color.primary.opacity(0.06) : .clear)
@@ -641,9 +789,17 @@ struct BigGroupRow: View {
             .help("Protected — slowing this would hurt system stability")
         } else {
             HStack(spacing: 6) {
+                // capMenu goes first, not between the two buttons: it keeps
+                // the destructive QuitMenu (a power-symbol icon, easy to
+                // mistake for a similarly-sized neighbor at a glance) as far
+                // as possible from any other icon — separated by the whole
+                // width of Slow down/Restore rather than sitting right next
+                // to it.
+                capMenu
                 if ourThrottled > 0 {
                     Button("Restore") { monitor.restoreGroup(group) }
                         .buttonStyle(.glass).font(.system(size: UI.caption))
+                        .help("Return \(group.name) to normal scheduling priority.")
                 } else {
                     Button("Slow down") {
                         // Big apps (a browser is 90+ helpers) get a confirm so a stray
@@ -651,8 +807,8 @@ struct BigGroupRow: View {
                         if group.count > 8 { confirmBulk = true } else { monitor.throttleGroup(group) }
                     }
                     .buttonStyle(.glass).font(.system(size: UI.caption))
+                    .help("Soft CPU throttle — lowers \(group.name)'s scheduling priority so the system favors other work under contention. It keeps running and can still respond, just slower under load. Gentler than Cap, and reversible any time with Restore.")
                 }
-                capMenu
                 QuitMenu(title: group.name, refusal: monitor.quitRefusal(group), count: group.count) {
                     monitor.quitGroup(group, mode: $0)
                 }
@@ -660,30 +816,55 @@ struct BigGroupRow: View {
         }
     }
 
-    /// The hard cap lives behind a menu rather than a button: it's the sharper
-    /// tool of the two and shouldn't be one stray click away.
+    /// Cap is a button in its own right, styled exactly like Slow down beside
+    /// it, because the two are peer answers to the same question — the row's
+    /// two ways to make a hog stop hurting. It stays a *menu* button rather
+    /// than a plain one only because a cap needs a percentage before it can be
+    /// applied; the sharper-tool caution lives in the one-time explainer
+    /// dialog and the tooltip, not in hiding the control.
     private var capMenu: some View {
-        Menu {
-            if let c = capRecord {
-                Text(String(format: "Capped at %d%% — currently %.1f%%", Int(c.percent), c.achieved))
-                Button("Remove cap") { monitor.clearCap(group) }
-                Divider()
-            }
-            ForEach(Monitor.capChoices, id: \.self) { pct in
-                Button("Cap at \(Int(pct))% of a core") { requestCap(pct) }
-            }
-            if let why = monitor.capRefusal(group) {
-                Divider()
-                Text("Can't cap — \(why)")
+        let refusal = capRecord == nil ? monitor.capRefusal(group) : nil
+        return Menu {
+            if let refusal {
+                // The only item, and the reason the button stays *enabled*
+                // when a group can't be capped: a disabled button that does
+                // nothing on click leaves "why is Cap greyed out for iTerm?"
+                // as a question the UI never answers. Clicking it answers it.
+                Text("Can't cap \(group.name) — \(refusal)")
+                Text("Slow down still works: it lowers priority instead of suspending.")
+            } else {
+                if let c = capRecord {
+                    Text(String(format: "Capped at %d%% — currently %.1f%%", Int(c.percent), c.achieved))
+                    Button("Remove cap") { monitor.clearCap(group) }
+                    Divider()
+                }
+                ForEach(Monitor.capChoices, id: \.self) { pct in
+                    Button("Cap at \(Int(pct))% of a core") { requestCap(pct) }
+                }
             }
         } label: {
-            glyph("speedometer", UI.body).foregroundStyle(capRecord == nil ? .secondary : .primary)
+            Text(capRecord == nil ? "Cap" : "Capped")
         }
-        .menuStyle(.borderlessButton)
+        // .button (not .borderlessButton) is what makes a button style apply
+        // at all: it renders the menu as an ordinary button that happens to
+        // open a menu. As a borderless menu it drew as a bare icon no matter
+        // what style was set on it.
+        //
+        // .glassProminent, not the plain .glass that Slow down uses, because
+        // a menu button does not pick up the ambient .tint the way a plain
+        // Button does — under .glass it came out neutral grey next to a blue
+        // Slow down. Prominent tints it from the same accent, so the two
+        // finally read as the peer actions they are.
+        .menuStyle(.button)
+        .buttonStyle(.glassProminent)
+        .tint(accent)
+        .font(.system(size: UI.caption))
         .menuIndicator(.hidden)
         .fixedSize()
-        .disabled(capRecord == nil && monitor.capRefusal(group) != nil)
-        .help("Hard CPU cap — holds \(group.name) under a set percentage by suspending and resuming it. Stricter than Slow down, and blunter: a suspended app can't respond until it's resumed.")
+        // Dimmed rather than disabled — see the refusal branch above.
+        .opacity(refusal == nil ? 1 : 0.55)
+        .help(refusal.map { "Can't cap \(group.name) — \($0). Slow down still works: it lowers priority instead of suspending." }
+              ?? "Hard CPU cap — holds \(group.name) under a set percentage by suspending and resuming it. Stricter than Slow down, and blunter: a suspended app can't respond until it's resumed.")
     }
 
     private func requestCap(_ pct: Double) {
@@ -865,10 +1046,11 @@ private struct RendererRow: View {
             }
             .padding(.leading, 60).frame(maxWidth: .infinity, alignment: .leading)
 
-            CPUCell(pct: proc.cpuPct, accent: accent, small: true).frame(width: 180, alignment: .trailing)
+            CPUCell(pct: proc.cpuPct, accent: accent, small: true).frame(width: CGFloat(monitor.cpuColumnWidth), alignment: .trailing)
             Text(fmtBytes(proc.rss)).font(.system(size: UI.caption)).monospacedDigit()
-                .foregroundStyle(.secondary).frame(width: 100, alignment: .trailing)
-            Spacer().frame(width: 132)
+                .foregroundStyle(.secondary).frame(width: CGFloat(monitor.memoryColumnWidth), alignment: .trailing)
+            CPUCell(pct: proc.gpuPct, accent: accent, small: true).frame(width: CGFloat(monitor.gpuColumnWidth), alignment: .trailing)
+            Spacer().frame(width: CGFloat(monitor.priorityColumnWidth) + 22)
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
                 if monitor.isThrottledByUs(proc.pid) {
@@ -890,7 +1072,7 @@ private struct RendererRow: View {
                     .opacity(hovering ? 1 : 0.55)
                 }
             }
-            .frame(width: 150, alignment: .trailing)
+            .frame(width: UI.actionsWidth, alignment: .trailing)
         }
         .padding(.horizontal, 22).frame(height: 36)
         .background(hovering ? Color.primary.opacity(0.05) : Color.primary.opacity(0.02))
@@ -1135,10 +1317,11 @@ private struct BigChildRow: View {
             }
             .padding(.leading, 60).frame(maxWidth: .infinity, alignment: .leading)
 
-            CPUCell(pct: proc.cpuPct, accent: accent, small: true).frame(width: 180, alignment: .trailing)
+            CPUCell(pct: proc.cpuPct, accent: accent, small: true).frame(width: CGFloat(monitor.cpuColumnWidth), alignment: .trailing)
             Text(fmtBytes(proc.rss)).font(.system(size: UI.caption)).monospacedDigit().foregroundStyle(.secondary)
-                .frame(width: 100, alignment: .trailing)
-            Spacer().frame(width: 132)
+                .frame(width: CGFloat(monitor.memoryColumnWidth), alignment: .trailing)
+            CPUCell(pct: proc.gpuPct, accent: accent, small: true).frame(width: CGFloat(monitor.gpuColumnWidth), alignment: .trailing)
+            Spacer().frame(width: CGFloat(monitor.priorityColumnWidth) + 22)
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
                 if monitor.isThrottledByUs(proc.pid) {
@@ -1157,7 +1340,7 @@ private struct BigChildRow: View {
                     .opacity(hovering ? 1 : 0.55)
                 }
             }
-            .frame(width: 150, alignment: .trailing)
+            .frame(width: UI.actionsWidth, alignment: .trailing)
         }
         .padding(.horizontal, 22).frame(height: 36)
         .background(hovering ? Color.primary.opacity(0.05) : Color.primary.opacity(0.02))
@@ -1249,6 +1432,7 @@ private struct CPUCell: View {
             Spacer(minLength: 0)
             Text(String(format: "%.1f%%", pct))
                 .font(.system(size: small ? UI.caption : UI.num)).monospacedDigit()
+                .lineLimit(1)
             Capsule().fill(.quaternary).frame(width: 78, height: 5)
                 .overlay(alignment: .leading) {
                     Capsule().fill(pct > 85 ? Color.red : pct > 50 ? Color.orange : accent)
@@ -1327,6 +1511,7 @@ private struct Pill: View {
         Text(text)
             .font(.system(size: UI.chip, weight: .semibold))
             .foregroundStyle(fg)
+            .lineLimit(1)
             .padding(.horizontal, 9).padding(.vertical, 3)
             .background(bg, in: Capsule())
     }

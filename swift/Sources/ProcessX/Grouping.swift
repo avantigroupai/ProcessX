@@ -10,6 +10,9 @@ struct ProcGroup: Identifiable {
     var parentKey: String?
     var cpu: Double = 0
     var mem: UInt64 = 0
+    /// Sum of `procs`' `gpuPct` — 0 unless GPU tracking is turned on. See
+    /// `ProcSample.gpuPct`.
+    var gpu: Double = 0
     var procs: [ProcSample] = []
     var isSystem: Bool = true
     var isCritical: Bool = false
@@ -125,6 +128,7 @@ enum Grouping {
             }
             groups[key]!.cpu += p.cpuPct
             groups[key]!.mem += p.rss
+            groups[key]!.gpu += p.gpuPct
             if p.uid == myUID { groups[key]!.isSystem = false }
             var pp = p
             pp.groupKey = key

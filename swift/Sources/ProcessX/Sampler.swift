@@ -19,6 +19,12 @@ struct ProcSample {
     /// start time is the pair that actually names a process.
     var startedAt: UInt64 = 0
     var groupKey: String = ""
+    /// % of a GPU sample window this process's threads used, as last reported
+    /// by the privileged GPU helper. 0 unless GPU tracking is turned on and
+    /// the helper has reported for this pid — the Sampler itself never
+    /// populates this (see Monitor.tick(), which splices it in from
+    /// gpuByPID before grouping).
+    var gpuPct: Double = 0
 }
 
 /// Reads the process table via libproc. No subprocesses, no text parsing.

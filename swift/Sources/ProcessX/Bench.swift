@@ -119,7 +119,7 @@ enum Bench {
         Thread.sleep(forTimeInterval: 1.0)
         monitor.tick()                          // real interval data, real row count
 
-        let content = MainWindow(monitor: monitor).frame(width: 1180, height: 800)
+        let content = MainWindow(monitor: monitor).frame(width: 1140, height: 800)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
         _ = renderer.nsImage                    // warm type metadata and the layout cache

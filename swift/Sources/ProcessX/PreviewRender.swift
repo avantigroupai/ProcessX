@@ -7,8 +7,12 @@ import SwiftUI
 /// Materials/vibrancy don't rasterise here, but layout, text and structure do.
 @MainActor
 enum PreviewRender {
+    /// `width` matters now that the table is responsive: the name column takes
+    /// whatever the fixed columns leave over, so "does this layout work" is a
+    /// question you can only ask at a specific width. Defaults to the window's
+    /// 1140pt minimum — the tightest case.
     static func run(to path: String, dark: Bool, rowsOnly: Bool = false, window: Bool = false,
-                    expandBrowser: Bool = false) {
+                    expandBrowser: Bool = false, width: CGFloat = 1140) {
         let monitor = Monitor()
         monitor.tick()                          // establish the CPU baseline
         Thread.sleep(forTimeInterval: 1.2)
@@ -38,8 +42,13 @@ enum PreviewRender {
 
         let inner: AnyView
         if window {
-            inner = AnyView(MainWindow(monitor: monitor).frame(width: 1180, height: 800))
+            inner = AnyView(MainWindow(monitor: monitor).frame(width: width, height: 800))
         } else if rowsOnly {
+            // Rows on their own have no MainWindow above them to measure the
+            // window, so tell the monitor the width directly — otherwise the
+            // columns size themselves against the 1140pt default and a
+            // --width render silently shows the wrong layout.
+            monitor.tableRowWidth = Double(width)
             inner = AnyView(VStack(spacing: 0) {
                 // With --expand, lead with the browser: it's the row whose
                 // expansion is worth looking at.
@@ -49,7 +58,7 @@ enum PreviewRender {
                                 startExpanded: expandBrowser)
                     Divider().opacity(0.4)
                 }
-            }.frame(width: 1180))
+            }.frame(width: width))
         } else {
             inner = AnyView(MenuContent(monitor: monitor))
         }

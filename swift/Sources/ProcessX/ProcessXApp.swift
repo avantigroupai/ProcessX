@@ -51,9 +51,19 @@ struct ProcessXApp: App {
                 PreviewRender.run(to: args[i + 1], dark: args.contains("--dark"),
                                   rowsOnly: args.contains("--rows"),
                                   window: args.contains("--window"),
-                                  expandBrowser: args.contains("--expand"))
+                                  expandBrowser: args.contains("--expand"),
+                                  width: Self.renderWidth(args))
             }
         }
+    }
+
+    /// `--width <points>` for `--render`, defaulting to the window's 1140pt
+    /// minimum. The table's name column is sized by what's left over, so a
+    /// layout check is only meaningful at a stated width.
+    private static func renderWidth(_ args: [String]) -> CGFloat {
+        guard let i = args.firstIndex(of: "--width"), i + 1 < args.count,
+              let w = Double(args[i + 1]) else { return 1140 }
+        return CGFloat(w)
     }
 
     var body: some Scene {
@@ -61,7 +71,7 @@ struct ProcessXApp: App {
         WindowGroup("ProcessX") {
             MainWindow(monitor: monitor)
         }
-        .defaultSize(width: 1180, height: 800)
+        .defaultSize(width: 1140, height: 800)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             CommandGroup(after: .toolbar) {
