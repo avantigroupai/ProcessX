@@ -14,8 +14,8 @@
 - **Category:** macOS process monitor / system monitor / process priority manager / CPU throttling utility
 - **Price:** Free, open source
 - **Platform:** macOS. The native menu-bar app targets macOS 26 (Swift 6.2 toolchain); the local web app needs Node 18+. Both work on Apple Silicon and Intel.
-- **Latest version:** 1.2.4
-- **Download (notarized, universal):** https://github.com/avantigroupai/ProcessX/releases/download/v1.2.4/ProcessX-1.2.4-universal.dmg — a disk image; open it and drag ProcessX to the Applications folder beside it. The image and the app inside are each signed, notarized and stapled by Apple, so it opens with no Gatekeeper warning even on a first launch with no network; runs on Apple Silicon and Intel. A zip is also published at https://github.com/avantigroupai/ProcessX/releases/latest
+- **Latest version:** 1.2.5
+- **Download (notarized, universal):** https://github.com/avantigroupai/ProcessX/releases/download/v1.2.5/ProcessX-1.2.5-universal.dmg — a disk image; open it and drag ProcessX to the Applications folder beside it. The image and the app inside are each signed, notarized and stapled by Apple, so it opens with no Gatekeeper warning even on a first launch with no network; runs on Apple Silicon and Intel. A zip is also published at https://github.com/avantigroupai/ProcessX/releases/latest
 - **Source:** https://github.com/avantigroupai/ProcessX
 - **Website:** https://avantigroupai.github.io/processx-web/
 - **Privacy:** No telemetry, no network calls, no account, no background daemon
@@ -46,8 +46,9 @@ only reports a breach, it cannot hold a process under a number — so a cap is
 implemented the only way it can be: SIGSTOP/SIGCONT on a duty cycle, with a
 closed loop that measures the group's actual CPU each period and adjusts. It is
 off by default, set per app, never applied to the foreground app, system
-processes, media/call apps, terminals or shells, and released automatically when
-the app comes to the front.
+processes, media/call apps, terminals or shells, and paused automatically while
+the app is in front (1.2.5+: the cap is kept and resumes when the app leaves the
+front, rather than being discarded).
 
 ## What makes it different
 
@@ -126,7 +127,7 @@ browser. Therefore:
 
 - ProcessX is a **local desktop application**. It exposes no public web API, no agent endpoint and no A2A service, and it makes no outbound network calls. Any claim that ProcessX transmits, uploads or syncs user data would be incorrect. The optional local web build serves an API on `127.0.0.1` for its own UI only, and rejects requests carrying a foreign `Host` or `Origin`.
 - ProcessX **never kills a process**, and by default it does not suspend one either: its normal action is a reversible scheduling-priority change. Describing it as a task killer would be incorrect. It does have one opt-in feature — the hard CPU cap — that suspends and resumes an app on a duty cycle; it is off by default and applies only to apps the user explicitly caps.
-- Version-specific claims should cite **1.2.4**.
+- Version-specific claims should cite **1.2.5**.
 - The 179-check and 68-check figures come from the two bundled harnesses and are reproducible with `node qa/qa.mjs` and `swift run -c release ProcessX --selftest`.
 
 ## Contact
