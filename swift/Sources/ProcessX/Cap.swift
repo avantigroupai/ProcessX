@@ -267,6 +267,9 @@ final class Capper: @unchecked Sendable {
             guard let c = self.caps[key], c.paused != paused else { return }
             c.paused = paused
             if paused {
+                // Unconditional, like clearLocked: a pending suspend continuation
+                // may already be queued, and `step` stops honouring the duty cycle
+                // from its next run — this makes the release immediate.
                 for t in c.targets { _ = kill(t.pid, SIGCONT) }
                 c.running = true
             }
@@ -372,6 +375,18 @@ final class Capper: @unchecked Sendable {
             return
         }
 
+        // Paused: keep the loop alive (so pruning still runs and un-pausing needs
+        // no restart), but never stop anything and never measure — the controller
+        // starts clean when the pause ends.
+        if c.paused {
+            resume(c)
+            c.achieved = 0
+            queue.asyncAfter(deadline: .now() + .milliseconds(Self.periodMs)) { [weak self] in
+                self?.step(key: key, gen: gen)
+            }
+            return
+        }
+
         let now = CFAbsoluteTimeGetCurrent()
         let ticks = c.targets.reduce(UInt64(0)) { $0 &+ (Self.cpuTicks($1.pid) ?? 0) }
         // A drop means the target set changed under us; skip one correction rather
@@ -405,7 +420,8 @@ final class Capper: @unchecked Sendable {
         }
         queue.asyncAfter(deadline: .now() + .milliseconds(runMs)) { [weak self] in
             guard let self, let c = self.caps[key], c.gen == gen else { return }
-            self.suspend(c)
+            // Paused since this period began: skip the stop, keep the schedule.
+            if !c.paused { self.suspend(c) }
             self.queue.asyncAfter(deadline: .now() + .milliseconds(Self.periodMs - runMs)) { [weak self] in
                 self?.step(key: key, gen: gen)
             }

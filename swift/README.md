@@ -220,7 +220,8 @@ and a button you pressed is a decision, not a surprise.
 - The **hard CPU cap** is the one action that suspends, so it is gated harder
   than the rest: no override for media and call apps, no terminals or shells,
   nothing already suspended by something else, never the foreground group, and
-  released the moment the app comes to the front. A cap survives nothing — the
+  paused the moment the app comes to the front — kept, not forgotten, and
+  enforced again once it leaves. A cap survives nothing — the
   pid list is written to disk before the first `SIGSTOP`, a signal handler
   resumes on any catchable fatal signal, and a detached guardian process resumes
   after a `SIGKILL`.

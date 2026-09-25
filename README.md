@@ -87,8 +87,9 @@ caps) live in `policy.json` and are loaded by the Node server under `lib/`.
   measures the group's real CPU each 200 ms period and adjusts the run window.
   Because a suspended app can't respond, it's gated harder than everything else:
   never the foreground app, never system, media or call apps, never terminals or
-  shells, never a process something else already suspended, released instantly
-  when you bring the app to the front, and shown behind a one-time explainer.
+  shells, never a process something else already suspended, paused instantly
+  when you bring the app to the front (and back on once it leaves), and shown
+  behind a one-time explainer.
   Crash safety is three-layered — the pid list is written to disk *before* the
   first `SIGSTOP`, a signal handler resumes everything on any catchable fatal
   signal, and a detached guardian process (`ProcessX --cap-guardian`) waits on the

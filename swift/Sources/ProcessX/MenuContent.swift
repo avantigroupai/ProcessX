@@ -217,7 +217,7 @@ struct GroupRow: View {
                 // "slowed" means WE slowed it. The kernel band alone would light up
                 // every browser's own backgrounded tabs and offer a dead Restore.
                 if ourThrottled > 0 { Chip(text: ourThrottled == group.count ? "slowed" : "\(ourThrottled) slowed") }
-                if let c = capRecord { Chip(text: "capped \(Int(c.percent))%") }
+                if let c = capRecord { Chip(text: "capped \(Int(c.percent))%" + (c.paused ? " · paused" : "")) }
 
                 Spacer(minLength: ms(4))
                 Text(String(format: "%.1f%%", group.cpu))

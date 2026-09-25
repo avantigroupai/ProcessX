@@ -555,19 +555,28 @@ final class Monitor: ObservableObject {
     }
 
     /// Per-tick cap maintenance: re-resolve each capped group's pids (helpers come
-    /// and go), and release a cap the moment its app comes to the front — the same
+    /// and go), and pause a cap the moment its app comes to the front — the same
     /// focus rescue auto-tame does, and far more important here, because a
     /// suspended app you just clicked on is a beachball.
+    ///
+    /// Pause, not clear: clearing is what this used to do, and it meant one
+    /// Cmd-Tab through a capped app — or clicking back into the terminal a capped
+    /// CLI session runs in — silently threw the cap away. The cap resumes by
+    /// itself once the app leaves the front.
     private func reconcileCaps() {
         guard !caps.isEmpty else { return }
 
-        for record in caps where model.isFront(record.key) {
-            capper.clear(record.key)
-            lastMessage = "\(record.name) came to the front — cap released"
-        }
-
         var fresh: [String: [CapTarget]] = [:]
-        for record in caps where !model.isFront(record.key) {
+        for record in caps {
+            let front = model.isFront(record.key)
+            if front != record.paused {
+                capper.setPaused(record.key, front)
+                lastMessage = front
+                    ? "\(record.name) came to the front — cap paused while you use it"
+                    : "\(record.name) left the front — cap at \(Int(record.percent))% back on"
+            }
+            // Front groups stay in `fresh` too: a key missing from it means the
+            // group is gone, and `refresh` would drop the cap.
             guard let g = model.group(for: record.key) else { continue }
             fresh[record.key] = capTargets(g, ours: Set(record.targets.map(\.pid)))
         }

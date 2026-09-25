@@ -476,6 +476,21 @@ enum SelfTest {
             check("recovery record written while capped",
                   CapPersistence.read().contains { $0.targets.contains { $0.pid == pid } })
 
+            // What focus does. A paused cap must stop suspending at once but keep
+            // its record — deleting it is the bug this replaced.
+            capper.setPaused("selftest", true)
+            Thread.sleep(forTimeInterval: 0.4)
+            check("paused cap never suspends", !everStopped(pid, over: 1.0))
+            check("paused cap is still held", capper.snapshot().first?.paused == true)
+            check("paused cap keeps its recovery record",
+                  CapPersistence.read().contains { $0.targets.contains { $0.pid == pid } })
+            capper.setPaused("selftest", false)
+            if measurable {
+                check("un-paused cap suspends again", everStopped(pid, over: 3.0))
+            } else {
+                skip("un-paused cap suspends again", "no headroom to cap")
+            }
+
             capper.clear("selftest")
             Thread.sleep(forTimeInterval: 0.8)
             // The failure this guards against is a stranded continuation still

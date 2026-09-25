@@ -648,7 +648,9 @@ struct BigGroupRow: View {
         "\(info.title) — \(info.category)\n\(info.detail)"
         + (group.count > 1 ? "\n\(group.count) processes" : "")
         + (capRecord.map {
-            String(format: "\nCapped at %d%% of a core — currently %.1f%%", Int($0.percent), $0.achieved)
+            $0.paused
+                ? String(format: "\nCapped at %d%% of a core — paused while the app is in front", Int($0.percent))
+                : String(format: "\nCapped at %d%% of a core — currently %.1f%%", Int($0.percent), $0.achieved)
         } ?? "")
     }
 
@@ -767,8 +769,8 @@ struct BigGroupRow: View {
     @ViewBuilder private var priorityCell: some View {
         if let c = capRecord {
             VStack(alignment: .leading, spacing: 1) {
-                Pill(text: "cap \(Int(c.percent))%", tone: .warn, accent: accent)
-                Text(String(format: "at %.1f%%", c.achieved))
+                Pill(text: "cap \(Int(c.percent))%", tone: c.paused ? .neutral : .warn, accent: accent)
+                Text(c.paused ? "paused" : String(format: "at %.1f%%", c.achieved))
                     .font(.system(size: UI.chip)).monospacedDigit().foregroundStyle(.tertiary)
             }
         } else if ourThrottled > 0 && ourThrottled == group.count {
@@ -834,7 +836,9 @@ struct BigGroupRow: View {
                 Text("Slow down still works: it lowers priority instead of suspending.")
             } else {
                 if let c = capRecord {
-                    Text(String(format: "Capped at %d%% — currently %.1f%%", Int(c.percent), c.achieved))
+                    Text(c.paused
+                         ? "Capped at \(Int(c.percent))% — paused while in front"
+                         : String(format: "Capped at %d%% — currently %.1f%%", Int(c.percent), c.achieved))
                     Button("Remove cap") { monitor.clearCap(group) }
                     Divider()
                 }
