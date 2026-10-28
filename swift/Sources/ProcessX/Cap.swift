@@ -277,6 +277,7 @@ final class Capper: @unchecked Sendable {
             // measured across a pause boundary describes two different regimes.
             c.lastStamp = 0
             c.runFraction = 1
+            self.persist()
             Audit.log("CAP      key=\(key) \(paused ? "paused (app in front)" : "resumed")")
         }
     }

@@ -484,7 +484,12 @@ enum SelfTest {
             check("paused cap is still held", capper.snapshot().first?.paused == true)
             check("paused cap keeps its recovery record",
                   CapPersistence.read().contains { $0.targets.contains { $0.pid == pid } })
+            check("paused cap persists paused=true to caps.json",
+                  CapPersistence.read().first?.paused == true)
             capper.setPaused("selftest", false)
+            Thread.sleep(forTimeInterval: 0.1)
+            check("un-paused cap persists paused=false to caps.json",
+                  CapPersistence.read().first?.paused == false)
             if measurable {
                 check("un-paused cap suspends again", everStopped(pid, over: 3.0))
             } else {
@@ -557,6 +562,18 @@ enum SelfTest {
                 check("still holding its target after ticking", !(m.cap(forKey: key)?.targets.isEmpty ?? true))
                 check("ProcessX never capped itself",
                       m.cap(forKey: key)?.targets.contains { $0.pid == getpid() } == false)
+
+                // Event-driven focus rescue: activating the capped process pauses the cap
+                // immediately without waiting for the 2s timer tick, and switching away resumes it.
+                m.applicationDidActivate(pid: pid)
+                check("applicationDidActivate pauses the cap at once",
+                      m.cap(forKey: key)?.paused == true)
+                check("applicationDidActivate writes paused=true to caps.json",
+                      CapPersistence.read().first { $0.key == key }?.paused == true)
+                check("focused target is immediately resumed", !stopped(pid))
+                m.applicationDidActivate(pid: getpid())
+                check("switching away un-pauses the cap",
+                      m.cap(forKey: key)?.paused == false)
 
                 m.clearCap(key: key, name: "burner")
                 Thread.sleep(forTimeInterval: 0.5)

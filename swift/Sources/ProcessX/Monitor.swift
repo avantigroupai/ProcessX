@@ -276,6 +276,13 @@ final class Monitor: ObservableObject {
         ) { [weak self] _ in
             self?.capper.clearAllSync()
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard let pid = app?.processIdentifier ?? SystemStats.frontmostPID() else { return }
+            Task { @MainActor in self?.applicationDidActivate(pid: pid) }
+        }
 
         if !Self.skipsNotificationBridge {
             alerter = SlowProcessAlerter(monitor: self)
@@ -391,6 +398,7 @@ final class Monitor: ObservableObject {
         model = m
         throttled = store.all.sorted { $0.at > $1.at }
         reconcileCaps()
+        rescueFrontThrottles()
 
         lastCPU = min(100, procs.reduce(0) { $0 + $1.cpuPct } / Double(SystemStats.coreCount))
         lastGPU = SystemStats.gpuUtilization()
@@ -584,6 +592,41 @@ final class Monitor: ObservableObject {
         caps = capper.snapshot()
     }
 
+    /// Event-driven focus rescue: called immediately when macOS activates an app
+    /// (`NSWorkspace.didActivateApplicationNotification`) instead of waiting up to
+    /// 2.0 seconds for the next sampling `tick()`. Pauses any cap on the newly
+    /// focused app (or terminal-hosted CLI) at once and restores any automatic or
+    /// QuickFast background-band throttles on it.
+    func applicationDidActivate(pid: pid_t) {
+        guard pid > 1 else { return }
+        let frontKey = model.byPID[pid]?.groupKey
+            ?? executablePath(of: pid).flatMap(Grouping.appName(of:)).map { "a:\($0)" }
+        var frontKeys: Set<String> = []
+        if let front = frontKey {
+            frontKeys.insert(front)
+            for g in model.groups where g.parentKey == front { frontKeys.insert(g.key) }
+        }
+        model.frontKey = frontKey
+        model.frontKeys = frontKeys
+
+        var changed = false
+        if !caps.isEmpty {
+            for record in caps {
+                let front = model.isFront(record.key) || record.targets.contains { $0.pid == pid }
+                if front != record.paused {
+                    capper.setPaused(record.key, front)
+                    lastMessage = front
+                        ? "\(record.name) came to the front — cap paused while you use it"
+                        : "\(record.name) left the front — cap at \(Int(record.percent))% back on"
+                    changed = true
+                }
+            }
+            if changed { caps = capper.snapshot() }
+        }
+        if rescueFrontThrottles(frontPID: pid) { changed = true }
+        if changed, uiActive { refreshVisible() }
+    }
+
     // MARK: - quit
 
     /// The pids between us and launchd. Quitting one of them takes ProcessX down
@@ -745,15 +788,35 @@ final class Monitor: ObservableObject {
 
     // MARK: - auto-tame
 
-    private func autoTameTick() {
-        // Focus rescue: you switched to something we tamed -> give it back.
-        for rec in store.all where rec.origin == .auto {
-            if let p = model.byPID[rec.pid], p.path == rec.path, model.isFront(p.groupKey) {
+    /// Focus rescue for background-band throttles applied automatically or via
+    /// QuickFast: when you switch to the app, restore normal priority at once.
+    @discardableResult
+    private func rescueFrontThrottles(frontPID: pid_t? = nil) -> Bool {
+        var rescued = false
+        for rec in store.all where rec.origin != .manual {
+            if let p = model.byPID[rec.pid], p.path == rec.path,
+               model.isFront(p.groupKey) || rec.pid == frontPID {
                 _ = Throttle.setBackground(rec.pid, false)
                 store.remove(rec.pid)
                 hotStreak[rec.pid] = nil
+                rescued = true
             }
         }
+        if rescued {
+            throttled = store.all.sorted { $0.at > $1.at }
+            var annotated = model.groups
+            for i in annotated.indices {
+                annotated[i].throttledByUs = annotated[i].procs.reduce(0) {
+                    $0 + (store.record($1.pid) == nil ? 0 : 1)
+                }
+            }
+            model.groups = annotated
+        }
+        return rescued
+    }
+
+    private func autoTameTick() {
+        rescueFrontThrottles()
 
         let now = Date()
         var toTame: [pid_t] = []

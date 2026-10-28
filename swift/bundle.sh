@@ -12,10 +12,16 @@ APP="build/ProcessX.app"
 # mix them. Set ARCHES=arm64 for a fast local build.
 ARCHES="${ARCHES:-arm64 x86_64}"
 
+SDK_ARGS=()
+if [ ! -f "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib" ] && \
+   [ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk" ]; then
+  SDK_ARGS=(--sdk "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk")
+fi
+
 BINARIES=()
 for ARCH in $ARCHES; do
   echo "==> Building $ARCH"
-  swift build -c release --arch "$ARCH" --scratch-path ".build/universal-$ARCH"
+  swift build --build-system native "${SDK_ARGS[@]}" -c release --arch "$ARCH" --scratch-path ".build/universal-$ARCH"
   BINARIES+=(".build/universal-$ARCH/$ARCH-apple-macosx/release/ProcessX")
 done
 
@@ -244,4 +250,6 @@ fi
 
 echo "built: $(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
 echo "dist:  $(cd "$(dirname "$DIST_ZIP")" && pwd)/$(basename "$DIST_ZIP")"
-[ -f "${DIST_DMG:-}" ] && echo "dmg:   $(cd "$(dirname "$DIST_DMG")" && pwd)/$(basename "$DIST_DMG")"
+if [ -f "${DIST_DMG:-}" ]; then
+  echo "dmg:   $(cd "$(dirname "$DIST_DMG")" && pwd)/$(basename "$DIST_DMG")"
+fi
